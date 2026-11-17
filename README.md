@@ -1,8 +1,8 @@
 # ridercli
 
-A Python CLI (and later MCP server) for talking to the Second Life viewer's editor
-WebSocket server — browse and edit in-world object inventories, scripts, and run
-viewer commands from your terminal.
+A Python CLI for talking to the Second Life viewer's editor WebSocket server —
+browse and edit in-world object inventories, transfer scripts/notecards
+(scp-style), control scripts, stream runtime output, and run viewer commands.
 
 - Protocol: [`external-editor-json-rpc.md`](./external-editor-json-rpc.md)
 - Plan & status: [`TASKS.md`](./TASKS.md)
@@ -12,8 +12,43 @@ viewer commands from your terminal.
 ```sh
 uv sync
 uv run ridercli probe        # connect + sanity-check the session
-uv run ridercli --help
+uv run ridercli status       # viewer identity, ping, stats
 ```
 
 The viewer must be running with its editor WebSocket server enabled
 (default `ws://127.0.0.1:9020`; override with `--url` or `RIDERCLI_URL`).
+
+## Everyday usage
+
+```sh
+# Explore an in-world object (needs modify perms), then browse it
+ridercli objects explore <object_uuid>
+ridercli objects list
+ridercli items list <prim>            # prim = uuid or name, or object/child path
+
+# scp-style transfer (names may be uuids or human paths)
+ridercli get  <item> [FILE]           # FILE omitted/'-' → stdout; dir → write into it
+ridercli put  FILE <prim> [NAME]      # .lsl/.luau → script, else notecard; '-' = stdin
+
+# Inventory management
+ridercli items create <prim> NAME --type script --vm lsl2
+ridercli items delete <item> -y
+ridercli items rename <item> NEW_NAME
+
+# Script control + output tailing (agent-friendly: --jsonl)
+ridercli scripts start|stop|reset <item> [--wait-update]
+ridercli tail --object <object> --jsonl     # streams llOwnerSay/debug until Ctrl-C
+
+# Viewer commands
+ridercli commands list
+ridercli commands run viewer.teleport --param object_id=<uuid>
+```
+
+Global flags: `--json` (raw JSON output), `--timeout`, `--connect-timeout`.
+
+## Notes
+
+- Objects must be **explored** (published) before their items can be addressed.
+- Item names are pure inventory names — no file extensions.
+- Worn attachments have flaky local-inventory sync in the current viewer build;
+  prefer name-based addressing and re-fetching (see TASKS.md findings).

@@ -143,12 +143,13 @@ Design rules:
   scripts are seeded with the default template; new notecards are empty (null asset).
 - The avatar sitting on an object appears as a child prim in published linksets.
 
-### Phase 3 — Scripts & runtime events
+### Phase 3 — Scripts & runtime events ✅
 
-- [ ] `ridercli scripts list` — `script.list` (temp dir + subscribed script ids)
-- [ ] `ridercli scripts start|stop <prim_id> <item_id>` — `object.script.set_running`
-      (`--wait-update` to confirm via `object.update`)
-- [ ] `ridercli scripts reset <prim_id> <item_id>` — `object.script.reset`
+- [x] `ridercli scripts list` — `script.list` (temp dir + subscribed script ids). LIVE-SMOKE-TESTED.
+- [x] `ridercli scripts start|stop <item>` — `object.script.set_running`
+      (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
+      live (would toggle a real script — do it with tapple present).
+- [x] `ridercli scripts reset <item>` — `object.script.reset`. Same caveat.
 - [ ] `ridercli tail [--object REF] [--kinds debug,error,update,compiled] [--jsonl]`
       — connect and stream notifications as they arrive (runtime.debug/error are
       broadcast to ALL connections for published objects; object.update filtered by
@@ -157,12 +158,13 @@ Design rules:
       script via `put`, then streams its llOwnerSay/debug output to unit-test it.
       No MCP needed for this.
 
-### Phase 4 — Viewer commands
+### Phase 4 — Viewer commands ✅
 
-- [ ] `ridercli commands list` — `command.list` with param tables
-- [ ] `ridercli commands run <command> [--param k=v ...] [--json-params ...]` —
-      `command.execute`; typed shortcuts: `teleport <uuid>`, `focus <uuid>`,
-      `save-back <uuid>`, `reset-all <uuid>`, `recompile-all <uuid> --target T`
+- [x] `ridercli commands list` — `command.list` with param tables. LIVE-SMOKE-TESTED.
+- [x] `ridercli commands run <command> [--param k=v ...] [--json-params ...]` —
+      `command.execute` with capability gate. Implemented; not exercised live
+      (teleport/focus would move tapple's avatar — do it with them present).
+- [ ] Optional: typed shortcuts (`ridercli teleport <uuid>` etc.) if desired
 
 ### Phase 5 — Agent ergonomics (optional, later)
 
@@ -178,6 +180,23 @@ via bash as long as `--help` is good and `--json` exists.
       viewer, security note (local-only, challenge file)
 - [ ] `ridercli --help` text for every command; consistent error messages
 - [ ] Optional: `RIDERCLI_URL` env var already supported — document it
+
+## Morning checklist for tapple (after unattended night work)
+
+1. In-world check of the TH AO object: confirm its 4 scripts are intact and that
+   `ridercli-put-test` notecard is gone (deletes were dispatched; the viewer's local
+   inventory view was flaky/stale at times tonight, so verify visually).
+2. Ground test object `ec45a12a`: should be empty again (all ridercli items deleted;
+   `ground-script 1` delete succeeded on retry). It may still have your linked second
+   prim + you sitting on it.
+3. Untested live (deliberately, while you were asleep): scripts start/stop/reset,
+   commands run (teleport/focus/save-back), items rename/describe/perms. Suggested:
+   `ridercli put` a trivial llOwnerSay script to the ground object, then
+   `ridercli tail --object ec45a12a... --jsonl` in one terminal and
+   `ridercli scripts start|stop ...` in another — that also validates the planned
+   agent unit-testing workflow.
+4. If image pasting still fails after this work: restart pi so it re-reads the fixed
+   models.json (`input: ["text","image"]` added for unsloth/Qwen3.8-27B-GGUF).
 
 ## Decisions (tapple)
 
