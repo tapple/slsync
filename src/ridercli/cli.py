@@ -1001,6 +1001,84 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
 # ------------------------------------------------------------------- commands
 
 
+@cli.group("commands")
+def commands_group() -> None:
+    """Run viewer commands (teleport, camera focus, save-back, ...)."""
+
+
+@commands_group.command("list")
+@click.pass_obj
+def commands_list(obj: Obj) -> None:
+    """List the commands the viewer supports, with their parameters."""
+
+    async def run() -> dict:
+        async with _session(obj) as s:
+            return await s.call("command.list", timeout=obj["timeout"])
+
+    p = _execute(obj, run)
+    if obj["json"]:
+        _emit_json(p)
+        return
+    for c in p.get("commands") or []:
+        click.echo(f"{c['command']}")
+        if c.get("description"):
+            click.echo(f"    {c['description']}")
+        for pname, info in (c.get("params") or {}).items():
+            req = "required" if info.get("required") else "optional"
+            desc = f" — {info['description']}" if info.get("description") else ""
+            click.echo(f"    --{pname.replace('_', '-')} <{info.get('type', '?')}> ({req}){desc}")
+
+
+def _parse_param(value: str) -> Any:
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError:
+        return value
+
+
+@commands_group.command("run")
+@click.argument("command_id")
+@click.option(
+    "--param",
+    multiple=True,
+    metavar="KEY=VALUE",
+    help="Command parameter (repeatable). VALUE is JSON-parsed when possible.",
+)
+@click.option("--json-params", default=None, help="Full params object as a JSON string.")
+@click.pass_obj
+def commands_run(obj: Obj, command_id: str, param: tuple[str, ...], json_params: str | None) -> None:
+    """Run a viewer command, e.g. 'commands run viewer.teleport --param object_id=...'."""
+    params: dict[str, Any] = {}
+    if json_params:
+        try:
+            params.update(json.loads(json_params))
+        except json.JSONDecodeError as e:
+            raise click.ClickException(f"invalid --json-params: {e}") from e
+    for p in param:
+        if "=" not in p:
+            raise click.ClickException(f"--param expects KEY=VALUE, got {p!r}")
+        k, v = p.split("=", 1)
+        params[k] = _parse_param(v)
+
+    async def run() -> dict:
+        async with _session(obj) as s:
+            if not (s.handshake and s.handshake.features.get("commands")):
+                raise ViewerError("viewer did not advertise the 'commands' feature")
+            return await s.call(
+                "command.execute", {"command": command_id, "params": params}, timeout=obj["timeout"]
+            )
+
+    p = _execute(obj, run)
+    if obj["json"]:
+        _emit_json(p)
+        return
+    click.echo(f"{command_id}: {'ok' if p.get('success') else 'FAILED'}")
+    if p.get("result") is not None:
+        click.echo(json.dumps(p["result"], indent=2))
+    if not p.get("success"):
+        raise SystemExit(1)
+
+
 def main() -> None:
     cli()
 

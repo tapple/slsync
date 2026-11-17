@@ -20,6 +20,8 @@ from ridercli.cli import cli
         (["scripts", "--help"], 0),
         (["scripts", "start", "--help"], 0),
         (["tail", "--help"], 0),
+        (["commands", "list", "--help"], 0),
+        (["commands", "run", "--help"], 0),
     ],
 )
 def test_cli_help(args, expected):
