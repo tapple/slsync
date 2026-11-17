@@ -101,10 +101,12 @@ class ViewerSession:
         url: str = DEFAULT_URL,
         client_name: str = CLIENT_NAME,
         client_version: str = CLIENT_VERSION,
+        timeout: float = 15.0,
     ):
         self.url = url
         self.client_name = client_name
         self.client_version = client_version
+        self.timeout = timeout  # connect + handshake timeout
         self.handshake: HandshakeInfo | None = None
 
         self._ws: ClientConnection | None = None
@@ -132,8 +134,10 @@ class ViewerSession:
     async def __aexit__(self, *exc: object) -> None:
         await self.close()
 
-    async def connect(self, timeout: float = 15.0) -> HandshakeInfo:
+    async def connect(self, timeout: float | None = None) -> HandshakeInfo:
         """Open the WebSocket and complete the session handshake."""
+        if timeout is None:
+            timeout = self.timeout
         self._ws = await websockets.connect(self.url, max_size=None)
         self._handshake_event = anyio.Event()
         self._ok_event = anyio.Event()
@@ -147,6 +151,7 @@ class ViewerSession:
             with anyio.fail_after(timeout):
                 await self._handshake_event.wait()
         except TimeoutError as e:
+            await self.close()
             raise HandshakeError(
                 f"timed out waiting for session.handshake from viewer at {self.url}"
             ) from e
@@ -184,6 +189,7 @@ class ViewerSession:
             with anyio.fail_after(timeout):
                 await self._ok_event.wait()
         except TimeoutError as e:
+            await self.close()
             raise HandshakeError("timed out waiting for session.ok after handshake") from e
         return info
 

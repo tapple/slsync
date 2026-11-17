@@ -79,14 +79,16 @@ Design rules:
       request handlers for viewer→us calls; notification log
 - [x] `ridercli probe` — sanity-check a fresh connection end-to-end
 
-### Phase 1 — Core CLI polish
+### Phase 1 — Core CLI polish ✅
 
-- [ ] `--json` global option (raw JSON out instead of pretty text)
-- [ ] Friendly error rendering for `ViewerRPCError` (show code + message, exit 1)
-- [ ] `ridercli status` — ping, version, `system.status`, `system.getStats`
-- [ ] Timeouts: per-call default 60 s; connect/handshake 15 s; `--timeout` override
-- [ ] Unit-test the JSON-RPC framing against a fake in-process WebSocket server
-      (no live viewer needed): handshake, call/response, error mapping, notifications
+- [x] `--json` global option (raw JSON out instead of pretty text)
+- [x] Friendly error rendering for `ViewerRPCError` (show code + message, exit 1)
+- [x] `ridercli status` — ping, version, `system.status`, `system.getStats`
+- [x] Timeouts: per-call default 60 s; connect/handshake 15 s; `--timeout` /
+      `--connect-timeout` global options
+- [x] Unit-test the JSON-RPC framing against a fake in-process WebSocket server
+      (no live viewer needed): handshake, call/response, error mapping, notifications,
+      timeouts, viewer→client requests, disconnect (12 tests, all passing)
 
 ### Phase 2 — Objects & inventory (the main event)
 
@@ -102,11 +104,15 @@ Design rules:
 - [ ] `ridercli objects rename|describe|perms <prim_id> ...` — `object.modify`
       (`--wait-update` optional)
 - [ ] `ridercli items list <prim_id>` — inventory of one prim
-- [ ] `ridercli items get <prim_id> <item_id>` — `object.content.get`; print to stdout
-      (raw, suitable for `> file`); notecards come back unwrapped
-- [ ] `ridercli items save <prim_id> <item_id> [-f FILE | -]` — read content from file
-      or stdin; `--vm {lsl2,mono,luau}`, `--run/--no-run`; print compile diagnostics
-      inline on failure
+- [ ] **scp-style transfer** (required — tapple works in batches, no live-sync):
+  - `ridercli get ADDR [FILE]` — `object.content.get`; to stdout if FILE omitted or `-`;
+    FILE may be a directory (use item's display name); notecards come back unwrapped
+  - `ridercli put FILE <prim> [NAME]` — upload: existing item by address →
+    `object.content.save` (`--vm`, `--run/--no-run`, inline compile diagnostics);
+    new NAME in prim → `object.item.create` (type from extension: `.lsl`→script,
+    `.luau`→script/luau, else notecard); `-` = stdin
+- [ ] Addressing everywhere: canonical `<prim_uuid>:<item_uuid>` *and* human paths
+      `[object]/[child prim]/item name`, resolved against the `object.list` tree
 - [ ] `ridercli items create <prim_id> <name> --type {script,notecard} [--vm ...]
       [--text ...]` — print created item (note possible rename)
 - [ ] `ridercli items delete <prim_id> <item_id>` — confirm prompt unless `-y`
@@ -131,16 +137,13 @@ Design rules:
       `command.execute`; typed shortcuts: `teleport <uuid>`, `focus <uuid>`,
       `save-back <uuid>`, `reset-all <uuid>`, `recompile-all <uuid> --target T`
 
-### Phase 5 — MCP server
+### Phase 5 — Agent ergonomics (optional, later)
 
-- [ ] Add `mcp` (FastMCP) dependency; `ridercli mcp` subcommand serving stdio
-- [ ] Tools mirroring Phase 2–4: `viewer_status`, `list_objects`, `explore_object`,
-      `get_item_content`, `save_item_content`, `create_item`, `delete_item`,
-      `modify_object|item`, `script_start_stop_reset`, `run_viewer_command`
-- [ ] Tool descriptions written for an LLM consumer (include the no-extension-name
-      and published-before-address gotchas)
-- [ ] Decide: fresh connection per tool call (simple; viewer handles many conns) vs
-      keep-alive daemon — start with fresh-per-call
+Decision (tapple): **CLI only**, no MCP server. Agents can drive the CLI directly
+via bash as long as `--help` is good and `--json` exists.
+
+- [ ] Optional: a short skill/markdown doc for agents covering the non-obvious
+      workflows (explore-before-address, name addressing rules, dispatched-not-applied)
 
 ### Phase 6 — Docs & polish
 
@@ -149,21 +152,22 @@ Design rules:
 - [ ] `ridercli --help` text for every command; consistent error messages
 - [ ] Optional: `RIDERCLI_URL` env var already supported — document it
 
+## Decisions (tapple)
+
+1. **No live-sync** — tapple works in batches; object-explorer scope is right.
+   scp-style get/put for notecards and scripts is a must-have (Phase 2).
+2. **CLI only** — no MCP server. Optional agent skill doc later (Phase 5).
+3. Announce before every live probe (tapple may have things turned off in-world).
+
 ## Open questions for tapple
 
-1. **Scope priority** — is Phase 2 (objects/items inventory browsing) the right
-   first target, or do you want script live-sync editing (`script.subscribe`) in
-   scope at all? (Live-sync means keeping a long-lived connection + file watching;
-   much bigger lift than the object explorer.)
-2. **CLI vs MCP** — build the CLI fully first and add the MCP server on top
-   (recommended), or do you want the MCP server earlier?
-3. **Test object** — which in-world object should I use for live testing? Easiest:
+1. **Test object** — which in-world object should I use for live testing? Easiest:
    click "Explore in IDE" on it in the viewer (it then appears in `object.list`),
    or give me its UUID for `objects explore`. Is it OK to create/delete a scratch
    notecard on it while testing?
-4. **agent_name came back empty** in the handshake — is your avatar actually
+2. **agent_name came back empty** in the handshake — is your avatar actually
    logged into a region when you test? (Some calls may behave differently.)
-5. Anything you expect from a "rider" workflow that isn't covered above
+3. Anything you expect from a "rider" workflow that isn't covered above
    (e.g. searching objects by name, bulk operations)?
 
 ## Testing notes
