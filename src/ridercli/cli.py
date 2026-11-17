@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 from typing import Any, Callable
@@ -534,6 +535,11 @@ def items_perms(obj: Obj, item_ref: str, next_owner: int) -> None:
 # ------------------------------------------------------------- get / put
 
 
+def _safe_filename(name: str) -> str:
+    """Make an inventory name safe to use as a local file name."""
+    return re.sub(r'[\\/:*?"<>|]', "_", name)
+
+
 @cli.command("get")
 @click.argument("item_ref")
 @click.argument("file", required=False, type=click.Path())
@@ -579,7 +585,7 @@ def get(obj: Obj, item_ref: str, file: str | None) -> None:
 
     path = file
     if os.path.isdir(path):
-        path = os.path.join(path, p["display_name"])
+        path = os.path.join(path, _safe_filename(p["display_name"]))
     with open(path, "w", encoding="utf-8") as f:
         f.write(content)
     click.echo(f"wrote {len(content)} chars to {path}", err=True)
@@ -606,6 +612,10 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
     '.luau' files Luau scripts, anything else a notecard. '-' reads stdin.
     """
 
+    src_ext: str | None = None
+    if file != "-" and (os.path.basename(file).lower().endswith(".lsl") or os.path.basename(file).lower().endswith(".luau")):
+        src_ext = os.path.basename(file).rsplit(".", 1)[-1].lower()
+
     if file == "-":
         content = sys.stdin.read()
         base = name or "pasted"
@@ -622,7 +632,11 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
             return "script", "luau"
         return "notecard", None
 
-    item_type, default_vm = infer_kind(base)
+    # The source file's extension is the strongest signal of content type;
+    # fall back to the (target) name's extension.
+    item_type, default_vm = (
+        infer_kind(base) if src_ext is None else ("script", {"lsl": "lsl2", "luau": "luau"}[src_ext])
+    )
     # Inventory names carry no extension.
     inv_name = base[:-4] if base.lower().endswith((".lsl", ".luau")) else base
 
@@ -644,7 +658,7 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
                     params["vm"] = vm
                 if running is not None:
                     params["running"] = running
-                r = await s.call("object.content.save", params, timeout=SAVE_TIMEOUT)
+                r = await _save_with_verify(s, prim["id"], existing["item_id"], params, content, obj)
                 return {"action": "updated", "item_id": existing["item_id"], **r}
 
             # Create the item first.
@@ -655,12 +669,38 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
             }
             if item_type == "script":
                 cparams["vm"] = vm or default_vm or "lsl2"
-            created = await s.call("object.item.create", cparams, timeout=SAVE_TIMEOUT)
+            try:
+                created = await s.call("object.item.create", cparams, timeout=SAVE_TIMEOUT)
+            except ViewerRPCError as create_err:
+                # Workaround for a viewer quirk (seen systematically on this
+                # build): the item is created in-world but the viewer's
+                # post-creation check races the inventory sync and fails.
+                # Detect the new item by diffing inventories, with retries.
+                before_ids = {it["item_id"] for it in prim["inventory"]}
+                created = None
+                for _ in range(20):  # up to ~20 s
+                    after = await O.fetch_published(s, timeout=obj["timeout"])
+                    try:
+                        _, prim_now = _resolve_prim_or_die(after, prim_ref)
+                    except click.ClickException:
+                        raise
+                    new_items = [
+                        it for it in prim_now["inventory"] if it["item_id"] not in before_ids
+                    ]
+                    if new_items:
+                        created = {
+                            "item_id": new_items[0]["item_id"],
+                            "name": new_items[0].get("name", inv_name),
+                        }
+                        break
+                    await anyio.sleep(1.0)
+                if created is None:
+                    raise create_err
             item_id = created["item_id"]
             actual_name = created.get("name", inv_name)
-            if item_type == "notecard":
-                return {"action": "created", "item_id": item_id, "name": actual_name}
-            # Scripts: upload content after creation.
+            # Upload content after creation for both types. (item.create's
+            # `text` param is not reliably honoured by sim-side cap handlers,
+            # which can leave an empty notecard; content.save always works.)
             sparams: dict[str, Any] = {
                 "prim_id": prim["id"],
                 "item_id": item_id,
@@ -670,7 +710,7 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
                 sparams["vm"] = vm
             if running is not None:
                 sparams["running"] = running
-            r = await s.call("object.content.save", params=sparams, timeout=SAVE_TIMEOUT)
+            r = await _save_with_verify(s, prim["id"], item_id, sparams, content, obj)
             return {"action": "created+updated", "item_id": item_id, "name": actual_name, **r}
 
     p = _execute(obj, run)
@@ -681,7 +721,9 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
     click.echo(f"{p['action']}: item {p.get('item_id')}")
     if p.get("name") and p.get("name") != inv_name:
         click.echo(f"  (simulator renamed it to {p['name']!r})")
-    if "compiled" in p:
+    if p.get("note"):
+        click.echo(f"  {p['note']}")
+    elif "compiled" in p:
         click.echo(f"  compiled: {'yes' if p['compiled'] else 'no'}")
         for d in p.get("diagnostics") or []:
             click.echo(
@@ -690,6 +732,32 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
             )
         if not p["compiled"]:
             raise SystemExit(1)
+
+
+async def _save_with_verify(s: ViewerSession, prim_id: str, item_id: str, params: dict, content: str, obj: Obj) -> dict:
+    """object.content.save with a read-back fallback.
+
+    On some viewer paths (seen with worn attachments) the upload completes but
+    the viewer's compile-wait never responds, so the call times out even though
+    the content is saved. Verify by reading the item back before failing.
+    """
+    try:
+        return await s.call("object.content.save", params=params, timeout=SAVE_TIMEOUT)
+    except ViewerRPCError as e:
+        if e.code != -32001:  # only timeouts are worth verifying
+            raise
+        rb = await s.call(
+            "object.content.get",
+            {"prim_id": prim_id, "item_id": item_id},
+            timeout=GET_TIMEOUT,
+        )
+        if rb.get("content") == content:
+            return {
+                "success": True,
+                "compiled": None,
+                "note": "viewer did not confirm compilation; verified by read-back",
+            }
+        raise
 
 
 def main() -> None:

@@ -90,35 +90,58 @@ Design rules:
       (no live viewer needed): handshake, call/response, error mapping, notifications,
       timeouts, viewer→client requests, disconnect (12 tests, all passing)
 
-### Phase 2 — Objects & inventory (the main event)
+### Phase 2 — Objects & inventory (the main event) ✅
 
-- [ ] `objects.py`: helpers over `object.list` results — find object by id, find prim
+- [x] `objects.py`: helpers over `object.list` results — find object by id, find prim
       (root or child) by uuid, find item within a prim; render trees as tables
-      (name, type, vm, running/faulted, perms)
-- [ ] `ridercli objects list` — currently explored objects + their inventories
-- [ ] `ridercli objects explore <object_id>` — `object.request`, then wait for the
-      `object.publish` notification (timeout ~10 s), print the tree
-- [ ] `ridercli objects stop <object_id>` — `object.unpublish` (idempotent)
-- [ ] `ridercli objects show <object_id>` — fetch via `object.list`, pretty-print one
-      object's full tree (incl. linked prims)
+      (name, type, vm, running/faulted, perms); 10 unit tests
+- [x] `ridercli objects list` — currently explored objects + their inventories
+- [x] `ridercli objects explore <object_id>` — `object.request`, then wait for the
+      `object.publish` notification (timeout ~15 s), print the tree. LIVE-VERIFIED.
+- [x] `ridercli objects stop <object_id>` — `object.unpublish` (idempotent)
+- [x] `ridercli objects show <object_id>` — fetch via `object.list`, pretty-print one
+      object's full tree (incl. linked prims). LIVE-VERIFIED (multi-prim linkset,
+      avatar-as-child-prim included).
 - [ ] `ridercli objects rename|describe|perms <prim_id> ...` — `object.modify`
       (`--wait-update` optional)
-- [ ] `ridercli items list <prim_id>` — inventory of one prim
-- [ ] **scp-style transfer** (required — tapple works in batches, no live-sync):
-  - `ridercli get ADDR [FILE]` — `object.content.get`; to stdout if FILE omitted or `-`;
-    FILE may be a directory (use item's display name); notecards come back unwrapped
-  - `ridercli put FILE <prim> [NAME]` — upload: existing item by address →
+- [x] `ridercli items list <prim_id>` — inventory of one prim. LIVE-VERIFIED.
+- [x] **scp-style transfer** (required — tapple works in batches, no live-sync):
+  - [x] `ridercli get ADDR [FILE]` — `object.content.get`; to stdout if FILE omitted or `-`;
+    FILE may be a directory (use item's display name, filename-sanitised — SL names
+    may contain `/`!); notecards come back unwrapped. LIVE-VERIFIED.
+  - [x] `ridercli put FILE <prim> [NAME]` — upload: existing item by address →
     `object.content.save` (`--vm`, `--run/--no-run`, inline compile diagnostics);
-    new NAME in prim → `object.item.create` (type from extension: `.lsl`→script,
-    `.luau`→script/luau, else notecard); `-` = stdin
-- [ ] Addressing everywhere: canonical `<prim_uuid>:<item_uuid>` *and* human paths
+    new NAME in prim → `object.item.create` + content upload (type from source file
+    extension, falling back to the name's); `-` = stdin. LIVE-VERIFIED (notecard and
+    script round-trips byte-exact).
+- [x] Addressing everywhere: canonical `<prim_uuid>:<item_uuid>` *and* human paths
       `[object]/[child prim]/item name`, resolved against the `object.list` tree
-- [ ] `ridercli items create <prim_id> <name> --type {script,notecard} [--vm ...]
+- [x] `ridercli items create <prim_id> <name> --type {script,notecard} [--vm ...]
       [--text ...]` — print created item (note possible rename)
-- [ ] `ridercli items delete <prim_id> <item_id>` — confirm prompt unless `-y`
+- [x] `ridercli items delete <prim_id> <item_id>` — confirm prompt unless `-y`. LIVE-VERIFIED.
 - [ ] `ridercli items rename|describe|perms <prim_id> <item_id> ...` —
-      `object.item.modify`
-- [ ] Verify against live viewer using tapple's inventory screenshot as ground truth
+      `object.item.modify` (implemented; untested live — write-only, low risk)
+- [x] Verify against live viewer using tapple's inventory screenshot as ground truth
+      (2 scripts + 646 animations on the AO; only scripts/notecards are exposed by
+      protocol design)
+
+#### Live-testing findings (official SL viewer, Equestrian)
+
+- `object.item.create` post-check **systematically races** the inventory sync and
+  fails with "Item was not found in updated inventory" even though the item is
+  created in-world → client workaround: diff inventories with retries (~20 s).
+- `item.create`'s `text` param (notecards) is silently dropped by the sim-side cap
+  handler → always create empty, then `object.content.save`.
+- `object.content.save` on scripts can hang past its own 60 s timeout without any
+  response (seen once on a worn attachment; later saves responded fine with
+  `compiled: yes`) → client verifies by read-back on timeout.
+- Worn-attachment inventories: local item UUIDs can diverge from the in-world view
+  (UUID re-issue on re-rez) and the viewer's local inventory view can go stale or
+  transiently empty (e.g. during linkset changes) → prefer name-based addressing;
+  re-fetch before acting.
+- Sim renames duplicate names ("ground-script" → "ground-script 1"); new LSL
+  scripts are seeded with the default template; new notecards are empty (null asset).
+- The avatar sitting on an object appears as a child prim in published linksets.
 
 ### Phase 3 — Scripts & runtime events
 
@@ -126,9 +149,13 @@ Design rules:
 - [ ] `ridercli scripts start|stop <prim_id> <item_id>` — `object.script.set_running`
       (`--wait-update` to confirm via `object.update`)
 - [ ] `ridercli scripts reset <prim_id> <item_id>` — `object.script.reset`
-- [ ] `ridercli tail [--object ID] [--kinds debug,error,update,compiled] [-n N]`
+- [ ] `ridercli tail [--object REF] [--kinds debug,error,update,compiled] [--jsonl]`
       — connect and stream notifications as they arrive (runtime.debug/error are
-      broadcast; object.update filtered by id when given); Ctrl-C to stop
+      broadcast to ALL connections for published objects; object.update filtered by
+      id when given); Ctrl-C to stop. **`--jsonl` is the agent mode** (one JSON
+      object per line on stdout) enabling tapple's planned workflow: agent writes a
+      script via `put`, then streams its llOwnerSay/debug output to unit-test it.
+      No MCP needed for this.
 
 ### Phase 4 — Viewer commands
 
@@ -172,8 +199,16 @@ via bash as long as `--help` is good and `--json` exists.
 
 ## Testing notes
 
-- Live viewer on `127.0.0.1:9020` (Alchemy Test build). `uv run ridercli probe`
-  is the smoke test; it must not disturb an existing VSCode plugin connection.
-- Inventory ground truth: tapple will screenshot the in-world inventory to compare
-  against `objects show` / `items list` output.
+- Live viewer on `127.0.0.1:9020`. Started with the Alchemy Test build; tapple has
+  since switched to the **official Second Life viewer** (`do-not-directly-run-secondlife-bin`),
+  which exposes objects properly (Alchemy left `agent_id` empty and dropped
+  published objects from `gObjectList` after a while).
+- Test object: TH AO avatar worn by tapple's avatar, region Equestrian. Worn
+  attachment UUIDs change on relink/requip (currently
+  `4506eea4-2ae3-e783-83d1-bb2fc7adde63`; it carries a "Show Object uuid/key"
+  script that llOwnerSays its own key).
+- Ground truth confirmed by tapple: 3 scripts visible over the protocol; the
+  object's ~646 animations are NOT exposed (protocol only carries scripts +
+  notecards — by design).
 - Challenge file lands in the viewer's tmpdir as `sl_script_challenge_<uuid>.tmp`.
+- Announce before every live probe (tapple may have things turned off in-world).
