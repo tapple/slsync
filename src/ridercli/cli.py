@@ -760,6 +760,247 @@ async def _save_with_verify(s: ViewerSession, prim_id: str, item_id: str, params
         raise
 
 
+# ------------------------------------------------------------------- scripts
+
+
+@cli.group("scripts")
+def scripts_group() -> None:
+    """Start, stop, and reset scripts in explored objects."""
+
+
+@scripts_group.command("list")
+@click.pass_obj
+def scripts_list(obj: Obj) -> None:
+    """List scripts the viewer currently tracks (live-sync subscriptions)."""
+
+    async def run() -> dict:
+        async with _session(obj) as s:
+            return await s.call("script.list", timeout=obj["timeout"])
+
+    p = _execute(obj, run)
+    if obj["json"]:
+        _emit_json(p)
+        return
+    click.echo(f"temp dir: {p.get('temp_dir')}")
+    ids = p.get("script_ids") or []
+    if not ids:
+        click.echo("no subscribed scripts")
+    for sid in ids:
+        click.echo(f"  {sid}")
+
+
+def _set_running_cmd(obj: Obj, item_ref: str, running: bool, wait_update: bool) -> None:
+    async def run() -> dict:
+        async with _session(obj) as s:
+            objs = await O.fetch_published(s, timeout=obj["timeout"])
+            o, prim, item = _resolve_item_or_die(objs, item_ref)
+            r = await s.call(
+                "object.script.set_running",
+                {"prim_id": prim["id"], "item_id": item["item_id"], "running": running},
+                timeout=obj["timeout"],
+            )
+            result = {**r, "item_id": item["item_id"], "object_id": o["object_id"]}
+            if wait_update:
+                # Confirmation arrives as an object.update (inventory replacement
+                # carrying the new running state); wait for one, then re-check.
+                deadline = time.monotonic() + 15.0
+                seen = False
+                while time.monotonic() < deadline and not seen:
+                    for _, m, p in s.notifications:
+                        if m == "object.update" and p and p.get("object_id") == o["object_id"]:
+                            seen = True
+                    if not seen:
+                        await anyio.sleep(0.5)
+                objs2 = await O.fetch_published(s, timeout=obj["timeout"])
+                try:
+                    _, prim2, item2 = _resolve_item_or_die(objs2, f"{prim['id']}:{item['item_id']}")
+                    result["confirmed"] = seen
+                    result["running_now"] = bool(item2.get("running"))
+                except click.ClickException:
+                    result["confirmed"] = seen
+                if not seen:
+                    result["note"] = "no object.update received within 15s"
+            return result
+
+    p = _execute(obj, run)
+    if obj["json"]:
+        _emit_json(p)
+        return
+    verb = "start" if running else "stop"
+    click.echo(f"{verb} dispatched for {p.get('item_id')}")
+    if "running_now" in p:
+        state = "running" if p["running_now"] else "stopped"
+        click.echo(f"  now: {state}" + ("" if p.get("confirmed") else " (no update observed)"))
+
+
+@scripts_group.command("start")
+@click.argument("item_ref")
+@click.option("--wait-update", is_flag=True, help="Wait for the confirming object.update (~15 s).")
+@click.pass_obj
+def scripts_start(obj: Obj, item_ref: str, wait_update: bool) -> None:
+    """Start a script (requires modify permission)."""
+    _set_running_cmd(obj, item_ref, True, wait_update)
+
+
+@scripts_group.command("stop")
+@click.argument("item_ref")
+@click.option("--wait-update", is_flag=True, help="Wait for the confirming object.update (~15 s).")
+@click.pass_obj
+def scripts_stop(obj: Obj, item_ref: str, wait_update: bool) -> None:
+    """Stop a script (requires modify permission)."""
+    _set_running_cmd(obj, item_ref, False, wait_update)
+
+
+@scripts_group.command("reset")
+@click.argument("item_ref")
+@click.pass_obj
+def scripts_reset(obj: Obj, item_ref: str) -> None:
+    """Reset a script to its default state (requires modify permission)."""
+
+    async def run() -> dict:
+        async with _session(obj) as s:
+            objs = await O.fetch_published(s, timeout=obj["timeout"])
+            _, prim, item = _resolve_item_or_die(objs, item_ref)
+            r = await s.call(
+                "object.script.reset",
+                {"prim_id": prim["id"], "item_id": item["item_id"]},
+                timeout=obj["timeout"],
+            )
+            return {**r, "item_id": item["item_id"]}
+
+    p = _execute(obj, run)
+    if obj["json"]:
+        _emit_json(p)
+        return
+    click.echo(f"reset dispatched for {p.get('item_id')}")
+
+
+# ---------------------------------------------------------------------- tail
+
+TAIL_KINDS = ("debug", "error", "update", "compiled")
+
+
+def _fmt_tail_line(kind: str, params: dict) -> str:
+    ts = time.strftime("%H:%M:%S")
+    if kind == "runtime.debug":
+        label = "SAY" if params.get("channel") == "owner_say" else "DBG"
+        return f"[{ts}] {label:<4} {params.get('object_name', '?')}: {params.get('message', '')}"
+    if kind == "runtime.error":
+        line = (
+            f"[{ts}] ERR  {params.get('object_name', '?')} "
+            f"line {params.get('line', 0)}: {params.get('error', params.get('message', ''))}"
+        )
+        for frame in (params.get("stack") or [])[1:]:
+            line += f"\n       at {frame}"
+        return line
+    if kind == "object.update":
+        what = []
+        if params.get("inventory") is not None:
+            what.append("root-inventory")
+        ch = (params.get("changes") or {}).get("linked_objects") or {}
+        if ch.get("modified"):
+            what.append(f"children:{len(ch['modified'])}")
+        if params.get("linked_objects") is not None:
+            what.append("linkset")
+        if params.get("object_name") is not None:
+            what.append("name")
+        return f"[{ts}] UPD  {params.get('object_id', '?')} ({', '.join(what) or '?'})"
+    if kind == "script.compiled":
+        diag = params.get("diagnostics") or []
+        extra = "; ".join(f"{d.get('level')}: {d.get('message')}" for d in diag[:3])
+        return (
+            f"[{ts}] CMP  script {params.get('script_id', '?')}: "
+            f"compiled={'yes' if params.get('success') else 'NO'} running={params.get('running')}"
+            + (f" [{extra}]" if extra else "")
+        )
+    return f"[{ts}] {kind} {json.dumps(params)}"
+
+
+@cli.command("tail")
+@click.option("--object", "object_ref", default=None, help="Only events for this object (UUID or name).")
+@click.option(
+    "--kinds",
+    default=",".join(TAIL_KINDS),
+    show_default=True,
+    help=f"Comma-separated subset of: {','.join(TAIL_KINDS)}.",
+)
+@click.option("--jsonl", is_flag=True, help="Emit one JSON object per line (agent mode).")
+@click.pass_obj
+def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
+    """Stream runtime events from the viewer until Ctrl-C.
+
+    runtime.debug / runtime.error are broadcast to all connections for objects
+    that are currently explored, so this tails llOwnerSay/debug output of any
+    running script in an explored object. With --jsonl, stdout carries only
+    JSON lines (status goes to stderr) — suitable for agents and pipes.
+    """
+    kind_set = {k.strip() for k in kinds.split(",") if k.strip()}
+    bad = kind_set - set(TAIL_KINDS)
+    if bad:
+        raise click.ClickException(f"unknown kinds: {', '.join(sorted(bad))}")
+
+    def make_session() -> ViewerSession:
+        s = _session(obj)
+
+        def on_notification(method: str, params: dict | None) -> None:
+            kind = None
+            if method == "runtime.debug" and "debug" in kind_set:
+                kind = "debug"
+            elif method == "runtime.error" and "error" in kind_set:
+                kind = "error"
+            elif method == "object.update" and "update" in kind_set:
+                kind = "update"
+            elif method == "script.compiled" and "compiled" in kind_set:
+                kind = "compiled"
+            if kind is None or params is None:
+                return
+            # compiled events carry no object id; pass them through the filter.
+            if obj_id_filter[0] and kind != "compiled":
+                oid = params.get("object_id")
+                if oid is not None and oid != obj_id_filter[0]:
+                    return
+            if jsonl:
+                click.echo(json.dumps({"ts": time.time(), "kind": kind, **params}), err=False)
+            else:
+                click.echo(_fmt_tail_line(method, params))
+
+        s.on_notification = on_notification
+        return s
+
+    obj_id_filter: list[str | None] = [None]
+
+    async def run() -> int:
+        s = make_session()
+        await s.connect()
+        try:
+            if object_ref:
+                objs = await O.fetch_published(s, timeout=obj["timeout"])
+                try:
+                    target = O.find_object(objs, object_ref)
+                except O.AddressError as e:
+                    raise click.ClickException(str(e)) from e
+                obj_id_filter[0] = target["object_id"]
+            click.echo(
+                f"tail: connected; kinds={','.join(sorted(kind_set))}"
+                + (f" object={obj_id_filter[0]}" if obj_id_filter[0] else "")
+                + " — Ctrl-C to stop",
+                err=True,
+            )
+            while True:
+                await anyio.sleep(3600)  # keep the task alive; events arrive via callback
+        finally:
+            await s.close()
+        return 0
+
+    try:
+        _execute(obj, run)
+    except KeyboardInterrupt:
+        click.echo("\ntail: stopped", err=True)
+
+
+# ------------------------------------------------------------------- commands
+
+
 def main() -> None:
     cli()
 
