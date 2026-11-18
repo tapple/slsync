@@ -1,4 +1,4 @@
-# ridercli — Task List
+# slsync — Task List
 
 A Python (click + anyio) CLI client — and later an MCP server — for the Second Life
 viewer's editor WebSocket server (`ws://127.0.0.1:9020` by default).
@@ -26,10 +26,10 @@ undocumented `system.getStats`.
 ## Architecture
 
 ```
-src/ridercli/
+src/slsync/
   __init__.py
   session.py    # DONE — ViewerSession: connect/handshake/call/notify, anyio+websockets
-  cli.py        # click entrypoint (ridercli ...)
+  cli.py        # click entrypoint (slsync ...)
   objects.py    # object tree helpers (find prim/item in published trees)   [planned]
   mcp_server.py # FastMCP server exposing the same ops as MCP tools          [planned]
 ```
@@ -74,16 +74,16 @@ Design rules:
 ### Phase 0 — Project setup ✅
 
 - [x] Copy protocol doc into this folder (`external-editor-json-rpc.md`)
-- [x] uv project (`click`, `websockets`, `anyio`), src layout, `ridercli` entrypoint
+- [x] uv project (`click`, `websockets`, `anyio`), src layout, `slsync` entrypoint
 - [x] `session.py`: connect → handshake (challenge) → `session.ok`; `call`/`notify`;
       request handlers for viewer→us calls; notification log
-- [x] `ridercli probe` — sanity-check a fresh connection end-to-end
+- [x] `slsync probe` — sanity-check a fresh connection end-to-end
 
 ### Phase 1 — Core CLI polish ✅
 
 - [x] `--json` global option (raw JSON out instead of pretty text)
 - [x] Friendly error rendering for `ViewerRPCError` (show code + message, exit 1)
-- [x] `ridercli status` — ping, version, `system.status`, `system.getStats`
+- [x] `slsync status` — ping, version, `system.status`, `system.getStats`
 - [x] Timeouts: per-call default 60 s; connect/handshake 15 s; `--timeout` /
       `--connect-timeout` global options
 - [x] Unit-test the JSON-RPC framing against a fake in-process WebSocket server
@@ -95,31 +95,31 @@ Design rules:
 - [x] `objects.py`: helpers over `object.list` results — find object by id, find prim
       (root or child) by uuid, find item within a prim; render trees as tables
       (name, type, vm, running/faulted, perms); 10 unit tests
-- [x] `ridercli objects list` — currently explored objects + their inventories
-- [x] `ridercli objects explore <object_id>` — `object.request`, then wait for the
+- [x] `slsync objects list` — currently explored objects + their inventories
+- [x] `slsync objects explore <object_id>` — `object.request`, then wait for the
       `object.publish` notification (timeout ~15 s), print the tree. LIVE-VERIFIED.
-- [x] `ridercli objects stop <object_id>` — `object.unpublish` (idempotent)
-- [x] `ridercli objects show <object_id>` — fetch via `object.list`, pretty-print one
+- [x] `slsync objects stop <object_id>` — `object.unpublish` (idempotent)
+- [x] `slsync objects show <object_id>` — fetch via `object.list`, pretty-print one
       object's full tree (incl. linked prims). LIVE-VERIFIED (multi-prim linkset,
       avatar-as-child-prim included).
-- [ ] `ridercli objects rename|describe|perms <prim_id> ...` — `object.modify`
+- [ ] `slsync objects rename|describe|perms <prim_id> ...` — `object.modify`
       (`--wait-update` optional)
-- [x] `ridercli items list <prim_id>` — inventory of one prim. LIVE-VERIFIED.
+- [x] `slsync items list <prim_id>` — inventory of one prim. LIVE-VERIFIED.
 - [x] **scp-style transfer** (required — tapple works in batches, no live-sync):
-  - [x] `ridercli get ADDR [FILE]` — `object.content.get`; to stdout if FILE omitted or `-`;
+  - [x] `slsync get ADDR [FILE]` — `object.content.get`; to stdout if FILE omitted or `-`;
     FILE may be a directory (use item's display name, filename-sanitised — SL names
     may contain `/`!); notecards come back unwrapped. LIVE-VERIFIED.
-  - [x] `ridercli put FILE <prim> [NAME]` — upload: existing item by address →
+  - [x] `slsync put FILE <prim> [NAME]` — upload: existing item by address →
     `object.content.save` (`--vm`, `--run/--no-run`, inline compile diagnostics);
     new NAME in prim → `object.item.create` + content upload (type from source file
     extension, falling back to the name's); `-` = stdin. LIVE-VERIFIED (notecard and
     script round-trips byte-exact).
 - [x] Addressing everywhere: canonical `<prim_uuid>:<item_uuid>` *and* human paths
       `[object]/[child prim]/item name`, resolved against the `object.list` tree
-- [x] `ridercli items create <prim_id> <name> --type {script,notecard} [--vm ...]
+- [x] `slsync items create <prim_id> <name> --type {script,notecard} [--vm ...]
       [--text ...]` — print created item (note possible rename)
-- [x] `ridercli items delete <prim_id> <item_id>` — confirm prompt unless `-y`. LIVE-VERIFIED.
-- [ ] `ridercli items rename|describe|perms <prim_id> <item_id> ...` —
+- [x] `slsync items delete <prim_id> <item_id>` — confirm prompt unless `-y`. LIVE-VERIFIED.
+- [ ] `slsync items rename|describe|perms <prim_id> <item_id> ...` —
       `object.item.modify` (implemented; untested live — write-only, low risk)
 - [x] Verify against live viewer using tapple's inventory screenshot as ground truth
       (2 scripts + 646 animations on the AO; only scripts/notecards are exposed by
@@ -145,12 +145,12 @@ Design rules:
 
 ### Phase 3 — Scripts & runtime events ✅
 
-- [x] `ridercli scripts list` — `script.list` (temp dir + subscribed script ids). LIVE-SMOKE-TESTED.
-- [x] `ridercli scripts start|stop <item>` — `object.script.set_running`
+- [x] `slsync scripts list` — `script.list` (temp dir + subscribed script ids). LIVE-SMOKE-TESTED.
+- [x] `slsync scripts start|stop <item>` — `object.script.set_running`
       (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
       live (would toggle a real script — do it with tapple present).
-- [x] `ridercli scripts reset <item>` — `object.script.reset`. Same caveat.
-- [ ] `ridercli tail [--object REF] [--kinds debug,error,update,compiled] [--jsonl]`
+- [x] `slsync scripts reset <item>` — `object.script.reset`. Same caveat.
+- [ ] `slsync tail [--object REF] [--kinds debug,error,update,compiled] [--jsonl]`
       — connect and stream notifications as they arrive (runtime.debug/error are
       broadcast to ALL connections for published objects; object.update filtered by
       id when given); Ctrl-C to stop. **`--jsonl` is the agent mode** (one JSON
@@ -160,11 +160,11 @@ Design rules:
 
 ### Phase 4 — Viewer commands ✅
 
-- [x] `ridercli commands list` — `command.list` with param tables. LIVE-SMOKE-TESTED.
-- [x] `ridercli commands run <command> [--param k=v ...] [--json-params ...]` —
+- [x] `slsync commands list` — `command.list` with param tables. LIVE-SMOKE-TESTED.
+- [x] `slsync commands run <command> [--param k=v ...] [--json-params ...]` —
       `command.execute` with capability gate. Implemented; not exercised live
       (teleport/focus would move tapple's avatar — do it with them present).
-- [ ] Optional: typed shortcuts (`ridercli teleport <uuid>` etc.) if desired
+- [ ] Optional: typed shortcuts (`slsync teleport <uuid>` etc.) if desired
 
 ### Phase 5 — Agent ergonomics (optional, later)
 
@@ -178,22 +178,22 @@ via bash as long as `--help` is good and `--json` exists.
 
 - [ ] README.md: setup (`uv sync`), usage examples, how to enable the server in the
       viewer, security note (local-only, challenge file)
-- [ ] `ridercli --help` text for every command; consistent error messages
+- [ ] `slsync --help` text for every command; consistent error messages
 - [ ] Optional: `RIDERCLI_URL` env var already supported — document it
 
 ## Morning checklist for tapple (after unattended night work)
 
 1. In-world check of the TH AO object: confirm its 4 scripts are intact and that
-   `ridercli-put-test` notecard is gone (deletes were dispatched; the viewer's local
+   `slsync-put-test` notecard is gone (deletes were dispatched; the viewer's local
    inventory view was flaky/stale at times tonight, so verify visually).
-2. Ground test object `ec45a12a`: should be empty again (all ridercli items deleted;
+2. Ground test object `ec45a12a`: should be empty again (all slsync items deleted;
    `ground-script 1` delete succeeded on retry). It may still have your linked second
    prim + you sitting on it.
 3. Untested live (deliberately, while you were asleep): scripts start/stop/reset,
    commands run (teleport/focus/save-back), items rename/describe/perms. Suggested:
-   `ridercli put` a trivial llOwnerSay script to the ground object, then
-   `ridercli tail --object ec45a12a... --jsonl` in one terminal and
-   `ridercli scripts start|stop ...` in another — that also validates the planned
+   `slsync put` a trivial llOwnerSay script to the ground object, then
+   `slsync tail --object ec45a12a... --jsonl` in one terminal and
+   `slsync scripts start|stop ...` in another — that also validates the planned
    agent unit-testing workflow.
 4. If image pasting still fails after this work: restart pi so it re-reads the fixed
    models.json (`input: ["text","image"]` added for unsloth/Qwen3.8-27B-GGUF).

@@ -95,7 +95,7 @@ wheels = [
 ]
 
 [[package]]
-name = "ridercli"
+name = "slsync"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

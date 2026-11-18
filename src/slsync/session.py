@@ -26,7 +26,7 @@ import websockets
 from websockets.asyncio.client import ClientConnection
 
 DEFAULT_URL = "ws://127.0.0.1:9020"
-CLIENT_NAME = "ridercli"
+CLIENT_NAME = "slsync"
 CLIENT_VERSION = "0.1.0"
 PROTOCOL_VERSION = "1.0"
 
@@ -43,7 +43,7 @@ CLIENT_FEATURES: dict[str, bool] = {
 
 
 class ViewerError(Exception):
-    """Base error for ridercli viewer interactions."""
+    """Base error for slsync viewer interactions."""
 
 
 class HandshakeError(ViewerError):
@@ -238,7 +238,7 @@ class ViewerSession:
         if self._ws is not None:
             try:
                 await self.notify(
-                    "session.disconnect", {"reason": 0, "message": "ridercli closing"}
+                    "session.disconnect", {"reason": 0, "message": "slsync closing"}
                 )
             except Exception:
                 pass

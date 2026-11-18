@@ -1,4 +1,4 @@
-"""ridercli command-line interface (click)."""
+"""slsync command-line interface (click)."""
 
 from __future__ import annotations
 
@@ -73,7 +73,7 @@ def _resolve_prim_or_die(objs: list[dict], address: str):
 
 
 @click.group(
-    name="ridercli", context_settings={"help_option_names": ["-h", "--help"]}
+    name="slsync", context_settings={"help_option_names": ["-h", "--help"]}
 )
 @click.option(
     "--url",
@@ -102,7 +102,7 @@ def _resolve_prim_or_die(objs: list[dict], address: str):
     type=float,
     help="Timeout for connect + handshake in seconds.",
 )
-@click.version_option(CLIENT_VERSION, prog_name="ridercli")
+@click.version_option(CLIENT_VERSION, prog_name="slsync")
 @click.pass_context
 def cli(ctx: click.Context, url: str, as_json: bool, timeout: float, connect_timeout: float) -> None:
     """Talk to the Second Life viewer's editor WebSocket server."""
@@ -240,7 +240,7 @@ def objects_list(obj: Obj) -> None:
         return
     if not objs:
         click.echo(
-            "no objects explored. Use 'ridercli objects explore <object_uuid>' "
+            "no objects explored. Use 'slsync objects explore <object_uuid>' "
             "or 'Explore in IDE' in the viewer."
         )
         return

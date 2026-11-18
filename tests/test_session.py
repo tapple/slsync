@@ -12,7 +12,7 @@ import anyio
 import pytest
 from websockets.asyncio.server import serve
 
-from ridercli.session import ViewerRPCError, ViewerSession
+from slsync.session import ViewerRPCError, ViewerSession
 
 
 class FakeViewer:
@@ -147,7 +147,7 @@ async def test_handshake_and_challenge():
             assert info.features["commands"] is True
 
     assert fake.handshake_result is not None
-    assert fake.handshake_result["client_name"] == "ridercli"
+    assert fake.handshake_result["client_name"] == "slsync"
     assert fake.handshake_result["protocol_version"] == "1.0"
     assert fake.handshake_result["challenge_response"] == fake.challenge_uuid
 

@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 
-from ridercli import objects as O
+from slsync import objects as O
 
 
 def _uuid(tag: str) -> str:

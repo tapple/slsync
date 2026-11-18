@@ -3,7 +3,7 @@
 import pytest
 from click.testing import CliRunner
 
-from ridercli.cli import cli
+from slsync.cli import cli
 
 
 @pytest.mark.parametrize(
@@ -27,4 +27,4 @@ from ridercli.cli import cli
 def test_cli_help(args, expected):
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == expected, result.output
-    assert "ridercli" in result.output
+    assert "slsync" in result.output

@@ -47,7 +47,7 @@ def require_explored(objects: list[dict]) -> None:
     if not objects:
         raise AddressError(
             "no objects are currently explored. Start one with:\n"
-            "  ridercli objects explore <object_uuid>\n"
+            "  slsync objects explore <object_uuid>\n"
             "(or use 'Explore in IDE' in the viewer UI)"
         )
 

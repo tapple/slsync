@@ -1,4 +1,4 @@
-# ridercli
+# slsync
 
 A Python CLI for talking to the Second Life viewer's editor WebSocket server —
 browse and edit in-world object inventories, transfer scripts/notecards
@@ -11,8 +11,8 @@ browse and edit in-world object inventories, transfer scripts/notecards
 
 ```sh
 uv sync
-uv run ridercli probe        # connect + sanity-check the session
-uv run ridercli status       # viewer identity, ping, stats
+uv run slsync probe        # connect + sanity-check the session
+uv run slsync status       # viewer identity, ping, stats
 ```
 
 The viewer must be running with its editor WebSocket server enabled
@@ -22,26 +22,26 @@ The viewer must be running with its editor WebSocket server enabled
 
 ```sh
 # Explore an in-world object (needs modify perms), then browse it
-ridercli objects explore <object_uuid>
-ridercli objects list
-ridercli items list <prim>            # prim = uuid or name, or object/child path
+slsync objects explore <object_uuid>
+slsync objects list
+slsync items list <prim>            # prim = uuid or name, or object/child path
 
 # scp-style transfer (names may be uuids or human paths)
-ridercli get  <item> [FILE]           # FILE omitted/'-' → stdout; dir → write into it
-ridercli put  FILE <prim> [NAME]      # .lsl/.luau → script, else notecard; '-' = stdin
+slsync get  <item> [FILE]           # FILE omitted/'-' → stdout; dir → write into it
+slsync put  FILE <prim> [NAME]      # .lsl/.luau → script, else notecard; '-' = stdin
 
 # Inventory management
-ridercli items create <prim> NAME --type script --vm lsl2
-ridercli items delete <item> -y
-ridercli items rename <item> NEW_NAME
+slsync items create <prim> NAME --type script --vm lsl2
+slsync items delete <item> -y
+slsync items rename <item> NEW_NAME
 
 # Script control + output tailing (agent-friendly: --jsonl)
-ridercli scripts start|stop|reset <item> [--wait-update]
-ridercli tail --object <object> --jsonl     # streams llOwnerSay/debug until Ctrl-C
+slsync scripts start|stop|reset <item> [--wait-update]
+slsync tail --object <object> --jsonl     # streams llOwnerSay/debug until Ctrl-C
 
 # Viewer commands
-ridercli commands list
-ridercli commands run viewer.teleport --param object_id=<uuid>
+slsync commands list
+slsync commands run viewer.teleport --param object_id=<uuid>
 ```
 
 Global flags: `--json` (raw JSON output), `--timeout`, `--connect-timeout`.
