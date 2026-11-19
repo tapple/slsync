@@ -66,6 +66,16 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   A single persistent MCP connection would have full protocol visibility —
   including the viewer's responses to sibling calls — in one place. Weigh this
   against the CLI-only decision (Decisions #2) if debugging needs grow.
+- Chat-ownership routing CONFIRMED by tapple 2026-11-19 evening: her manual
+  `slsync tail` (no --url, i.e. default 9020) showed no output from Pippin's
+  published prim — she had assumed 9020 was Pippin's port; retrying against the
+  right viewer worked. Practical rule: to see a prim's script output, tail the
+  viewer whose AVATAR owns/receives that prim's chat.
+- getStats nuance (2026-11-19): the official viewer's own log shows exactly ONE
+  "global" method registered at server start (`Registered global method:
+  system.getStats`); all other methods appear per-connection. So
+  `global_method_count: 1` may be correct-as-designed — phrase any report as a
+  semantics question, not a violation.
 
 ## Viewer bug report notes (master copy until posted; started 2026-11-18)
 
