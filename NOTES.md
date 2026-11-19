@@ -258,6 +258,8 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
    both projects. That doesn't change the license choice (MIT is permissive and
    compatible with an LGPL work), but LICENSE gained an "Attribution / derived
    works" section so the MIT copyright notice is carried with every copy.
+   Per-file header added to `src/slsync/session.py` (the closest translation of
+   their client); other files left unheadered for now.
 
 ## Open questions for tapple
 

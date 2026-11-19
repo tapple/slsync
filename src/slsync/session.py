@@ -1,5 +1,10 @@
 """Async WebSocket + JSON-RPC 2.0 session to the Second Life viewer's editor server.
 
+Copyright (C) 2026 tapple. Part of slsync, licensed under GNU LGPL v2.1 (see LICENSE).
+Substantially derived from sl-vscode-plugin (https://github.com/secondlife/sl-vscode-plugin),
+``packages/sl-ide-ws-client/src/viewereditwsclient.ts``, Copyright (C) 2025 Linden
+Research, Inc., MIT License.
+
 Built on ``anyio`` for structured concurrency and the ``websockets`` asyncio client
 for the transport (anyio runs on top of asyncio by default).
 
