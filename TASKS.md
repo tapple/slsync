@@ -319,7 +319,9 @@ Log format per finding: date — method/call — expected vs actual — repro st
 ### B1. "Explore in IDE" → objects never appear in Alchemy's `object.list` (2026-11-19)
 - UI discrepancy (tapple's repro for Rye): on the official viewer, pressing
   "Explore in IDE" changes the button text to **"Stop Exploring"**; on Alchemy the
-  button text does not change.
+  button text does not change. This is consistent with a broken button handler:
+  Alchemy's handler never reaches the state where it would toggle text or emit
+  `object.request`.
 - Setup: the SAME 4 prims selected + Explore-in-IDE pressed in BOTH viewers; each
   avatar exposes 2 prims it owns and 2 it doesn't (ownership mix untested, possibly
   buggy on both). Both avatars logged into Equestrian (a luau region).
@@ -332,7 +334,26 @@ Log format per finding: date — method/call — expected vs actual — repro st
 - Next: tapple to provide the prim UUIDs out-of-band (Show-Object-uuid/key script
   or inspect), then drive `object.request` directly per UUID against BOTH viewers →
   2×2 matrix {9020, 9021} × {owned, not-owned} isolates button path vs publish
-  pipeline vs ownership. Results appended below.
+  pipeline vs ownership.
+
+#### Results (2026-11-19 ~07:45Z)
+
+**All 4 UUIDs published successfully on BOTH viewers via `object.request`:**
+
+| UUID | Owner | Official 9021 | Alchemy 9020 |
+|---|---|---|---|
+| b8af6575…336e | PippinGao (owned by official) | ✅ published, listed | ✅ published, listed |
+| 689a7470…436b | PippinGao (owned by official) | ✅ published, listed | ✅ published, listed |
+| e5f103bb…9fcb8 | tapple (NOT owned by official) | ✅ published, listed | ✅ published, listed |
+| 7a01ff67…8000 | tapple (NOT owned by official) | ✅ published, listed (+inventory tree) | ✅ published, listed (+inventory tree) |
+
+**Conclusion: The bug is isolated to the "Explore in IDE" button path.**
+- `object.request` via protocol works perfectly on both viewers.
+- Ownership is irrelevant — non-owned prims published fine on both.
+- The button click handler either doesn't call `object.request`, calls it with wrong params,
+  or fails silently before the publish notification fires.
+- Alchemy's missing button-text toggle (B1 UI discrepancy) is consistent with a broken
+  button handler that never reaches the state where it would emit the request.
 
 ### B2. Handshake reports empty agent identity despite logged-in avatar (2026-11-19)
 - `session.handshake` response: `agent_id: ""`, `agent_name: ""` while tapple's
