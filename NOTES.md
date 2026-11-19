@@ -36,13 +36,21 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   UNRELIABLE — it reported "lsl" for the Luau script (object.list correctly
   shows vm=luau); slsync detects Luau via the lua_script markers.
 - Compile errors: PARTIALLY FIXED (2026-11-19). Inline diagnostics on `object.content.save`
-  response now WORK — returns `compiled: no` with error messages (e.g. "ERROR line
-  1: Syntax error"). This was previously broken (returned success:true with NO compiled
-  field/diagnostics). HOWEVER, the `script.compiled` notification still does NOT arrive
-  over the broadcast channel when compilation fails. So: inline diagnostics = fixed;
-  notification = still missing. (Related upstream issue about VM reset on compile
-  failure remains valid: scripts that failed compilation forget their intended VM —
-  see https://feedback.secondlife.com/slua-alpha/p/scripts-with-a-compiler-error-forget-their-vm)
+  response now WORK — returns `compiled: no` with error messages for all error types:
+  - Syntax errors → "ERROR line N: Syntax error"
+  - Undefined variables → "ERROR line N: Name not defined within scope"
+  - Wrong function names → "ERROR line N: Name not defined within scope"
+  - Luau syntax → "Expected ')' (to close '(' at line N), got 'end'"
+  
+  This was previously broken (returned success:true with NO compiled field/diagnostics).
+  HOWEVER, the `script.compiled` notification still does NOT arrive over the broadcast
+  channel when compilation fails. So: inline diagnostics = fixed; notification = still
+  missing.
+  
+  VM preservation test (2026-11-19): LSL scripts KEEP their intended VM after compile
+  failure (tested lsl2, mono — both preserved). Luau scripts also preserve VM. The
+  upstream issue about VM reset on compile failure appears to be FIXED or at least not
+  reproducible in current testing.
 - F1 test result (2026-11-19): `scripts start|stop` WORK — script output starts/stops
   as expected via tail. HOWEVER, `--wait-update` does NOT work: no `object.update`
   notification arrives for these operations, so we can't confirm the state change.
