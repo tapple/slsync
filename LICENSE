@@ -500,3 +500,22 @@ necessary.  Here is a sample; alter the names:
   Ty Coon, President of Vice
 
 That's all there is to it!
+
+-------------------------------------------------------------------------------
+Attribution / derived works
+-------------------------------------------------------------------------------
+slsync is a derivative work. Substantial parts were written with reference
+to, and adapted (including translated between languages) from, the following:
+
+1. Official Second Life viewer source — GNU LGPL v2.1, Linden Lab.
+   `external-editor-json-rpc.md` is a verbatim copy of the viewer's protocol
+   documentation, and parts of this client were written against the viewer's
+   editor-server implementation.
+2. sl-vscode-plugin — MIT License, Copyright (c) 2025 Linden Research, Inc.
+   (https://github.com/secondlife/sl-vscode-plugin). The WebSocket
+   editor-client behaviour (handshake, feature flags, JSON-RPC message
+   shapes) was adapted from `packages/sl-ide-ws-client`.
+
+The combined work is licensed under the GNU Lesser General Public License
+version 2.1 stated above; the MIT-licensed portions remain available under
+their original MIT terms as well.

@@ -252,7 +252,12 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
    (Linden Lab, LGPL-2.1 — see `../viewer/doc/LICENSE-source.txt`), and handshake/
    feature-flag behaviour mirrors sl-vscode-plugin (MIT, Linden Research). LGPL-2.1
    is the more restrictive of the two and covers both; plain 2.1 without "or
-   later", matching the viewer's own terms.
+   later", matching the viewer's own terms. Clarification (tapple): agents wrote
+   the code while referencing sl-vscode-plugin, and translating/adapting counts
+   as a derivative work — so the *code* (not just the doc file) derives from
+   both projects. That doesn't change the license choice (MIT is permissive and
+   compatible with an LGPL work), but LICENSE gained an "Attribution / derived
+   works" section so the MIT copyright notice is carried with every copy.
 
 ## Open questions for tapple
 

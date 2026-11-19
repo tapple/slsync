@@ -57,11 +57,14 @@ Global flags: `--json` (raw JSON output), `--timeout`, `--connect-timeout`.
 ## License
 
 Licensed under the [GNU Lesser General Public License v2.1](./LICENSE) (LGPL-2.1),
-the more restrictive of the licenses of the material this project is derived from:
+the more restrictive of the licenses of the projects this one derives from:
 
-- `external-editor-json-rpc.md` is a verbatim copy of the official Second Life
-  viewer's protocol documentation, which Linden Lab provides under LGPL-2.1.
-- Handshake/feature-flag behaviour mirrors [sl-vscode-plugin](../sl-vscode-plugin),
-  MIT-licensed by Linden Research, Inc. (compatible with and subsumed by LGPL-2.1).
+- The official Second Life viewer source (LGPL-2.1, Linden Lab): the protocol
+  doc `external-editor-json-rpc.md` is a verbatim copy, and parts of the client
+  were written against the viewer's editor-server implementation.
+- [sl-vscode-plugin](https://github.com/secondlife/sl-vscode-plugin) (MIT,
+  Linden Research, Inc.): the WebSocket editor-client behaviour (handshake,
+  feature flags, JSON-RPC message shapes) was adapted from its
+  `sl-ide-ws-client` package.
 
-All other code is original work released under the same LGPL-2.1 terms.
+See the attribution section at the end of [LICENSE](./LICENSE).
