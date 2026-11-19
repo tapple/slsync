@@ -197,8 +197,18 @@ via bash as long as `--help` is good and `--json` exists.
 
 #### tail-for-agents design note (tapple 2026-11-18 + agent analysis)
 
-Concern (tapple): `slsync tail` never completes by design, but agents need tool
-calls to return before they can reason about results. Options:
+Concern 1 (tapple): `slsync tail` never completes by design, but agents need tool
+calls to return before they can reason about results.
+
+Concern 2 (tapple): **listen-before-put race** — if an agent puts a script and then
+waits for the viewer's (sometimes very slow) inventory confirmation before starting
+to listen, the script may finish executing before listening begins. Agent
+workaround: start a background tail *before* inserting the script. This should be
+the **first item in the Phase 5 skill doc**; alternative design: combine script
+insertion + bounded tail into one tool call. (Deferred until tapple actually starts
+using the workflow.)
+
+Options for concern 1:
 
 - **Bounded tail (proposed next step)**: add `--max-events N` and/or `--timeout T`
   to `tail`, exit 0 when reached. Agent workflow becomes: put script → start →
@@ -290,3 +300,46 @@ calls to return before they can reason about results. Options:
   notecards — by design).
 - Challenge file lands in the viewer's tmpdir as `sl_script_challenge_<uuid>.tmp`.
 - Announce before every live probe (tapple may have things turned off in-world).
+- 2026-11-18: tapple exposed **2 prims** via the protocol on 9020 for testing.
+  Viewer is **Alchemy**, suspected of websocket implementation bugs — tapple has
+  already seen a UI discrepancy in what "Explore in IDE" does and is preparing a
+  bug report for Rye. **Record every anomaly observed during probing** (see below).
+
+## Viewer bug report notes (for Rye, started 2026-11-18)
+
+Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer
+behaved correctly in the same scenarios on 2026-11-17/18.
+
+Log format per finding: date — method/call — expected vs actual — repro steps.
+
+### B1. "Explore in IDE" → object never appears in `object.list` (2026-11-19)
+- tapple exposed 2 prims via the viewer UI; he also reports a UI discrepancy in
+  what that button does on his end (details TBC).
+- `object.list` (no params) → empty list, though 2 objects should be published.
+- Same flow worked correctly on the official SL viewer (explored objects appeared
+  and stayed listed).
+- Related known Alchemy symptom from 2026-11-18: published objects drop from
+  `gObjectList` after a while.
+- Open: need one prim UUID to test `object.request` directly (isolate button path
+  vs whole publish pipeline) + tapple's exact repro of the UI discrepancy.
+
+### B2. Handshake reports empty agent identity despite logged-in avatar (2026-11-19)
+- `session.handshake` response: `agent_id: ""`, `agent_name: ""` while tapple's
+  avatar is logged into a region (Alchemy). Official SL viewer returned real
+  values in the same scenario.
+- tapple hypothesis: may correlate with luau-enabled regions — untestable so far
+  because Alchemy returns empty regardless.
+
+### B3. `system.ping` response `server_time` = -2147483648 (INT32_MIN) (2026-11-19)
+- Every ping: `"server_time": -2147483648` — exact int32 min, looks like an
+  uninitialised/failed 32-bit read.
+- The server clearly knows its own time: `system.getStats.uptime` advanced
+  correctly between calls (07:01:58Z → 07:04:38Z), so not a clock issue.
+  (Side note: that field is named "uptime" but reports current server time.)
+
+### B4. `system.getStats` counters stuck at zero (2026-11-19, possibly by design)
+- After ~8 successful calls across 2 connections, `total_requests_handled: 0`
+  and `total_notifications_sent: 0` (each connection's `session.ok` notification
+  alone should make the latter ≥ 2 if it counts notifications).
+- Same response: `global_method_count: 1` despite many advertised methods.
+- getStats is undocumented — flag all three for Rye's clarification.
