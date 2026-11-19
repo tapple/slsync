@@ -1,8 +1,9 @@
 [project]
 name = "slsync"
 version = "0.1.0"
-description = "Add your description here"
+description = "Python CLI client for the Second Life viewer's editor WebSocket server"
 readme = "README.md"
+license = "LGPL-2.1-only"
 authors = [
     { name = "tapple", email = "tapplek@gmail.com" }
 ]

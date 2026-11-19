@@ -53,3 +53,15 @@ Global flags: `--json` (raw JSON output), `--timeout`, `--connect-timeout`.
 - Item names are pure inventory names — no file extensions.
 - Worn attachments have flaky local-inventory sync in the current viewer build;
   prefer name-based addressing and re-fetching (see NOTES.md findings).
+
+## License
+
+Licensed under the [GNU Lesser General Public License v2.1](./LICENSE) (LGPL-2.1),
+the more restrictive of the licenses of the material this project is derived from:
+
+- `external-editor-json-rpc.md` is a verbatim copy of the official Second Life
+  viewer's protocol documentation, which Linden Lab provides under LGPL-2.1.
+- Handshake/feature-flag behaviour mirrors [sl-vscode-plugin](../sl-vscode-plugin),
+  MIT-licensed by Linden Research, Inc. (compatible with and subsumed by LGPL-2.1).
+
+All other code is original work released under the same LGPL-2.1 terms.

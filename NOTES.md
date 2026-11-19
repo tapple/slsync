@@ -245,6 +245,14 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
 5. Null-asset notecards: tapple saw none in the first `put` test; later ones went
    unchecked. An in-prim script could check automatically (open item from
    checklist 3).
+6. **License: LGPL-2.1** (2026-11-19). Repo now ships a `LICENSE` (LGPL 2.1 text,
+   identical to the viewer's) + `license = "LGPL-2.1-only"` in pyproject.toml
+   (PEP 639; verified in wheel METADATA as `License-Expression`). Rationale:
+   `external-editor-json-rpc.md` is a verbatim copy of the official viewer's doc
+   (Linden Lab, LGPL-2.1 — see `../viewer/doc/LICENSE-source.txt`), and handshake/
+   feature-flag behaviour mirrors sl-vscode-plugin (MIT, Linden Research). LGPL-2.1
+   is the more restrictive of the two and covers both; plain 2.1 without "or
+   later", matching the viewer's own terms.
 
 ## Open questions for tapple
 
