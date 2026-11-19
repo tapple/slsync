@@ -321,8 +321,16 @@ Options for concern 1:
 
 ## Viewer bug report notes (for Rye, started 2026-11-18)
 
-Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer
-behaved correctly in the same scenarios on 2026-11-17/18.
+Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer.
+
+**Report status as of 2026-11-19 evening:**
+- Alchemy-specific, worth sending: **B2** (empty agent identity — A/B verified).
+- Shared/by-design, optional UX gripe for Rye: B1 resolution (silent no-op when
+  external editor can't launch; multi-select ignored) + B3/B4 (common to both
+  viewers: server_time INT32_MIN, getStats counters zero — ask for semantics).
+- Official viewer report (tapple's own, separate): port-in-use crash on startup;
+  ping `timestamp` echo truncated to int32 (B5); ping `server_time` INT32_MIN
+  (B3). The "Stop Exploring" label thing is NOT a bug — do not include.
 
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
@@ -355,9 +363,12 @@ WARNING ScriptEditorWS launchVSCode : Failed to launch VS Code. …
 …and ZERO `buildAndSendPublish` entries for any button press (only for our
 protocol probes).
 
-- Why it "worked" 2026-11-17: an agent session was actively connected via
-  slsync when the button was pressed → direct-publish branch. No client today →
-  VS Code branch → silent failure.
+- Why objects appeared in `object.list` on 2026-11-17: almost certainly our
+  protocol `objects explore` calls (which publish regardless of connections),
+  conflated with the button in the notes. (Tapple's correct objection: slsync
+  CLI connections last <1 s, so "happened to be connected at press time" is
+  unlikely; a long-running `slsync tail` would have been needed — and Nov-17
+  logs are rotated, so unverifiable.)
 - The official viewer's "Stop Exploring" label tapple saw was CORRECT state
   reflection: after our protocol probe published her prims (08:21Z), the panel
   refresh synced toggle state from `isObjectPublished()` = true. Not a bug.
@@ -371,6 +382,34 @@ protocol probes).
 1. Keep a websocket client connected — e.g. background `slsync tail --jsonl`
    (persistent connection; also tapple's planned agent workflow), OR
 2. Install VS Code so `code` is on PATH (+ sl-vscode-plugin).
+   (Tapple has VSCodium, but it provides `codium`, not `code` — and she does
+   NOT want the VS-Code path anyway: prior experience with sl-vscode-plugin
+   was poor due to its workspace handling, though its sync client itself is
+   fine — that's the part slsync studied/copied. The connected-client route
+   via slsync is the preferred usage.)
+
+#### LIVE VERIFICATION (2026-11-19 ~11:32Z) — button works with a connected client
+
+Setup: unpublished b8af6575 from 9021 and e5f103bb from 9020; started two
+persistent `slsync tail --jsonl` listeners (one per viewer). Tapple pressed
+Explore in IDE on each target prim, no VS Code involved:
+- **11:32:04Z — official 9021: b8af6575 appeared** (tail saw its object event
+  at 11:32:02Z)
+- **11:32:29Z — Alchemy 9020: e5f103bb appeared** (tail saw its object event
+  at 11:32:27Z)
+
+Conclusion: the button's direct-publish branch works on BOTH viewers. B1 is
+fully closed as a bug; the only remaining gripe for Rye is the silent-failure
+UX (no user-visible error when the editor can't launch / no hint that a
+connected client changes behaviour).
+
+Side findings from this round:
+- Alchemy did NOT drop published objects this time — all 4 stayed listed for
+  3+ h (the 2026-11-18 gObjectList-drop symptom did not reproduce).
+- `slsync tail` does not capture `object.publish`/`unpublish` (kinds are only
+  debug/error/update/compiled) — the publish notifications were dropped by our
+  own listener. Candidate improvement: add `publish`/`unpublish` kinds; useful
+  for tapple's planned put→tail agent workflow (wait-for-publish).
 - Related known Alchemy symptom from 2026-11-18: published objects drop from
   `gObjectList` after a while.
 - Next: tapple to provide the prim UUIDs out-of-band (Show-Object-uuid/key script
