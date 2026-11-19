@@ -5,7 +5,8 @@ browse and edit in-world object inventories, transfer scripts/notecards
 (scp-style), control scripts, stream runtime output, and run viewer commands.
 
 - Protocol: [`external-editor-json-rpc.md`](./external-editor-json-rpc.md)
-- Plan & status: [`TASKS.md`](./TASKS.md)
+- Tasks: [`TASKS.md`](./TASKS.md) · Findings & notes: [`NOTES.md`](./NOTES.md) ·
+  Architecture: [`ARCHITECTURE.md`](./ARCHITECTURE.md) · Agents: [`AGENTS.md`](./AGENTS.md)
 
 ## Quick start
 
@@ -51,4 +52,4 @@ Global flags: `--json` (raw JSON output), `--timeout`, `--connect-timeout`.
 - Objects must be **explored** (published) before their items can be addressed.
 - Item names are pure inventory names — no file extensions.
 - Worn attachments have flaky local-inventory sync in the current viewer build;
-  prefer name-based addressing and re-fetching (see TASKS.md findings).
+  prefer name-based addressing and re-fetching (see NOTES.md findings).
