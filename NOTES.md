@@ -87,10 +87,11 @@ expected vs actual — repro steps.
 - Official viewer report: POSTED by tapple —
   https://feedback.secondlife.com/slua-alpha/p/bugs-with-the-lua-plugin-websocket
   She merged the shared-bug items in and rewrote for readability. Her item 6 =
-  the Explore-in-IDE publish conditions (B1 resolution). Note: her first draft of
-  item 6's evidence lines cited the getStats counters, which are zero regardless
-  of state (that's the separate counters bug) — a corrected version citing
-  `object.list` + viewer log lines was handed back in-session.
+  the Explore-in-IDE publish conditions (B1 resolution); #7 (getStats counters /
+  global_method_count semantics) was posted later with prose compaction. Draft
+  item #8 (multi-select "only first processed") was NOT posted — tapple disputed
+  it and the source confirms her side (button disabled for multi-root selections);
+  see FOLLOWUPS.md F3.
 - Alchemy report: SENT to Rye (trimmed form: B2 + B6 + confirmed-working list +
   pointer to this repo; shared bugs referenced via the official report link).
 
@@ -138,8 +139,11 @@ protocol probes).
 - The official viewer's "Stop Exploring" label tapple saw was CORRECT state
   reflection: after our protocol probe published her prims (08:21Z), the panel
   refresh synced toggle state from `isObjectPublished()` = true. Not a bug.
-- Also found: the button only processes `getFirstRootObject()` — selecting 4
-  prims and clicking once only acts on ONE of them (no error, no feedback).
+- The button handler uses `getFirstRootObject()`, but for multi-root selections
+  the button is DISABLED (`new_button_enabled` requires single_root), so it can
+  only ever act on a single-root selection. (An earlier note claiming "select 4
+  prims and click → only one processed" was wrong — tapple correctly disputed it;
+  see FOLLOWUPS.md F3 for the remaining verification.)
 - UX issues worth flagging to Rye (both viewers): silent failure when the
   external editor can't launch (log-only warning); no indication which mode
   (direct-publish vs launch-editor) applies; multi-select ignored.
