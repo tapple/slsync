@@ -316,19 +316,19 @@ behaved correctly in the same scenarios on 2026-11-17/18.
 
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
-### B1. "Explore in IDE" → objects never appear in Alchemy's `object.list` (2026-11-19)
-- UI discrepancy (tapple's repro for Rye): on the official viewer, pressing
-  "Explore in IDE" changes the button text to **"Stop Exploring"**; on Alchemy the
-  button text does not change. This is consistent with a broken button handler:
-  Alchemy's handler never reaches the state where it would toggle text or emit
-  `object.request`.
-- Setup: the SAME 4 prims selected + Explore-in-IDE pressed in BOTH viewers; each
-  avatar exposes 2 prims it owns and 2 it doesn't (ownership mix untested, possibly
-  buggy on both). Both avatars logged into Equestrian (a luau region).
-- Alchemy (9020): `object.list` → empty despite the 4 explored prims.
-- Official (9021): **ALSO empty** as of 2026-11-19 ~07:35Z (polled every 10 s for
-  ~60 s, no change) — differs from 2026-11-17/18 when explored objects appeared.
-  New variable this round: the ownership mix (2 not-owned prims per avatar).
+### B1. "Explore in IDE" → objects never appear in `object.list` (2026-11-19)
+- **Alchemy:** button text does not change (unlike official, which toggles to
+  "Stop Exploring"). Consistent with a broken button handler that never reaches
+  the state where it would toggle text or emit `object.request`.
+- **Official viewer:** ALSO empty after Explore-in-IDE button presses. Last night
+  (Nov 17/18) official DID show objects in list — this appears to be a regression
+  on the official build, OR there's a shared state variable that differs between
+  sessions.
+- Setup: initial test had 4 prims (2 owned + 2 not-owned per avatar). Follow-up
+  test with only owned prims confirmed same result on both viewers.
+- Alchemy (9020): `object.list` → empty despite button presses and protocol probes.
+- Official (9021): `object.list` → empty after button presses; works when driven
+  via `object.request` protocol.
 - Related known Alchemy symptom from 2026-11-18: published objects drop from
   `gObjectList` after a while.
 - Next: tapple to provide the prim UUIDs out-of-band (Show-Object-uuid/key script
@@ -355,6 +355,18 @@ Log format per finding: date — method/call — expected vs actual — repro st
 - Alchemy's missing button-text toggle (B1 UI discrepancy) is consistent with a broken
   button handler that never reaches the state where it would emit the request.
 
+#### Follow-up: owned-prims-only test (2026-11-19 ~08:20Z)
+
+Tapple restarted both viewers and published only owned prims (no ownership mix). Same result:
+- Both viewers' `object.list` stayed empty after Explore-in-IDE button presses (polled 60s).
+- **Official viewer regression:** last night (Nov 17/18) official DID show objects in list
+  after Explore in IDE. Today it does not — same symptom as Alchemy.
+- Protocol `object.request` still works perfectly on both viewers (confirmed via 2×2 probe).
+
+**Updated conclusion:** The "Explore in IDE" button path is broken on **both** viewers
+as of this session. The official viewer may have regressed, or there's a shared state
+variable that differs between sessions.
+
 ### B2. Handshake reports empty agent identity despite logged-in avatar (2026-11-19)
 - `session.handshake` response: `agent_id: ""`, `agent_name: ""` while tapple's
   avatar is logged into a region (Alchemy). Official SL viewer returned real
@@ -380,7 +392,9 @@ Log format per finding: date — method/call — expected vs actual — repro st
   and `total_notifications_sent: 0` (each connection's `session.ok` notification
   alone should make the latter ≥ 2 if it counts notifications).
 - Same response: `global_method_count: 1` despite many advertised methods.
-- getStats is undocumented — flag all three for Rye's clarification.
+- **A/B (2026-11-19): official viewer returns identical counters** — common to
+  both viewers, not Alchemy-specific. getStats is undocumented; please clarify
+  expected semantics for Rye.
 
 ### B5. Official viewer truncates ping `timestamp` echo to signed int32 (2026-11-19)
 - Spec: `timestamp` = "The original timestamp from the request, echoed by the
