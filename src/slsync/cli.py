@@ -877,14 +877,16 @@ def scripts_reset(obj: Obj, item_ref: str) -> None:
 
 # ---------------------------------------------------------------------- tail
 
-TAIL_KINDS = ("debug", "error", "update", "compiled")
+# All notification kinds tail can render; default is the console-relevant ones.
+TAIL_KINDS = ("debug", "error", "update", "compiled", "publish", "unpublish")
+DEFAULT_TAIL_KINDS = ("debug", "error")
 
 
 def _fmt_tail_line(kind: str, params: dict) -> str:
     ts = time.strftime("%H:%M:%S")
     if kind == "runtime.debug":
-        label = "SAY" if params.get("channel") == "owner_say" else "DBG"
-        return f"[{ts}] {label:<4} {params.get('object_name', '?')}: {params.get('message', '')}"
+        # Viewer-console style: [HH:MM:SS] ObjectName: message
+        return f"[{ts}] {params.get('object_name', '?')}: {params.get('message', '')}"
     if kind == "runtime.error":
         line = (
             f"[{ts}] ERR  {params.get('object_name', '?')} "
@@ -913,27 +915,63 @@ def _fmt_tail_line(kind: str, params: dict) -> str:
             f"compiled={'yes' if params.get('success') else 'NO'} running={params.get('running')}"
             + (f" [{extra}]" if extra else "")
         )
+    if kind == "object.publish":
+        o = params.get("object") or {}
+        n = len(o.get("linked_objects") or [])
+        return (
+            f"[{ts}] PUB  {o.get('object_name') or o.get('object_id', '?')} "
+            f"[{o.get('object_id', '?')}]"
+            + (f" ({n} linked prim(s))" if n else "")
+        )
+    if kind == "object.unpublish":
+        reason = f" ({params['reason']})" if params.get("reason") else ""
+        return f"[{ts}] UNPUB {params.get('object_id', '?')}{reason}"
     return f"[{ts}] {kind} {json.dumps(params)}"
 
 
 @cli.command("tail")
-@click.option("--object", "object_ref", default=None, help="Only events for this object (UUID or name).")
+@click.option("--object", "object_ref", default=None, help="Only events for this object (UUID or name). Ignored with --raw.")
 @click.option(
     "--kinds",
-    default=",".join(TAIL_KINDS),
+    default=",".join(DEFAULT_TAIL_KINDS),
     show_default=True,
-    help=f"Comma-separated subset of: {','.join(TAIL_KINDS)}.",
+    help=f"Comma-separated subset of: {','.join(TAIL_KINDS)}. Ignored with --raw.",
 )
-@click.option("--jsonl", is_flag=True, help="Emit one JSON object per line (agent mode).")
+@click.option("--jsonl", is_flag=True, help="Emit one JSON object per line on stdout (agent mode).")
+@click.option(
+    "--raw",
+    is_flag=True,
+    help="Print every wire frame exactly as received/sent, prefixed [in]/[out] "
+    "(full JSON-RPC traffic both directions; protocol debugging). "
+    "Ignores --kinds/--jsonl/--object.",
+)
 @click.pass_obj
-def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
-    """Stream runtime events from the viewer until Ctrl-C.
+def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool) -> None:
+    """Stream events from the viewer's editor WebSocket until Ctrl-C.
 
-    runtime.debug / runtime.error are broadcast to all connections for objects
-    that are currently explored, so this tails llOwnerSay/debug output of any
-    running script in an explored object. With --jsonl, stdout carries only
-    JSON lines (status goes to stderr) — suitable for agents and pipes.
+    The viewer broadcasts notifications to ALL connected clients, so this
+    connection passively receives script output (llOwnerSay/print →
+    runtime.debug, faults → runtime.error) and object lifecycle events for
+    every explored object — no subscription needed. Keeping a tail running
+    also means the viewer's "Explore in IDE" button publishes directly
+    instead of trying to launch an external editor.
+
+    Display modes:
+      (default)  human-readable, viewer-console style: [HH:MM:SS] ObjectName: message
+      --jsonl    one JSON object per line on stdout (status → stderr); agent mode
+      --raw      every wire frame as received/sent; protocol debugging
+
+    Kinds (default: debug,error): debug, error, update, compiled, publish,
+    unpublish. 'compiled' events carry no object id and bypass --object.
+
+    Examples:
+      slsync tail                          # watch script output of explored objects
+      slsync tail --object "TH AO"         # one object, by name or UUID
+      slsync tail --jsonl > events.jsonl & # agent: capture in background
+      slsync tail --kinds debug,error,publish   # also see objects (re)publishing
     """
+    if raw and jsonl:
+        raise click.ClickException("--raw and --jsonl are mutually exclusive")
     kind_set = {k.strip() for k in kinds.split(",") if k.strip()}
     bad = kind_set - set(TAIL_KINDS)
     if bad:
@@ -941,6 +979,12 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
 
     def make_session() -> ViewerSession:
         s = _session(obj)
+
+        if raw:
+            s.on_raw_frame = lambda direction, text: click.echo(
+                f"[{direction}] {text}"
+            )
+            return s
 
         def on_notification(method: str, params: dict | None) -> None:
             kind = None
@@ -952,11 +996,18 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
                 kind = "update"
             elif method == "script.compiled" and "compiled" in kind_set:
                 kind = "compiled"
+            elif method == "object.publish" and "publish" in kind_set:
+                kind = "publish"
+            elif method == "object.unpublish" and "unpublish" in kind_set:
+                kind = "unpublish"
             if kind is None or params is None:
                 return
             # compiled events carry no object id; pass them through the filter.
             if obj_id_filter[0] and kind != "compiled":
-                oid = params.get("object_id")
+                if kind == "publish":  # id is nested under params["object"]
+                    oid = (params.get("object") or {}).get("object_id")
+                else:
+                    oid = params.get("object_id")
                 if oid is not None and oid != obj_id_filter[0]:
                     return
             if jsonl:
@@ -973,7 +1024,7 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
         s = make_session()
         await s.connect()
         try:
-            if object_ref:
+            if object_ref and not raw:
                 objs = await O.fetch_published(s, timeout=obj["timeout"])
                 try:
                     target = O.find_object(objs, object_ref)
@@ -981,7 +1032,8 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool) -> None:
                     raise click.ClickException(str(e)) from e
                 obj_id_filter[0] = target["object_id"]
             click.echo(
-                f"tail: connected; kinds={','.join(sorted(kind_set))}"
+                "tail: connected; mode="
+                + ("raw" if raw else f"kinds={','.join(sorted(kind_set))}")
                 + (f" object={obj_id_filter[0]}" if obj_id_filter[0] else "")
                 + " — Ctrl-C to stop",
                 err=True,

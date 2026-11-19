@@ -137,10 +137,12 @@ Design rules:
 - `object.content.save` on scripts can hang past its own 60 s timeout without any
   response (seen once on a worn attachment; later saves responded fine with
   `compiled: yes`) → client verifies by read-back on timeout.
-- Worn-attachment inventories: local item UUIDs can diverge from the in-world view
-  (UUID re-issue on re-rez) and the viewer's local inventory view can go stale or
-  transiently empty (e.g. during linkset changes) → prefer name-based addressing;
-  re-fetch before acting.
+- Worn-attachment inventories: local item UUIDs can diverge from the in-world
+  view and the viewer's local inventory view can go stale or transiently empty
+  (e.g. during linkset changes) → prefer name-based addressing; re-fetch before
+  acting. (tapple 2026-11-19: object UUIDs are assigned once when instantiated
+  from avatar inventory — attachments get a NEW uuid every login, which fully
+  explains the attachment uuid churn.)
 - Sim renames duplicate names ("ground-script" → "ground-script 1"); new LSL
   scripts are seeded with the default template; new notecards are empty (null asset).
 - The avatar sitting on an object appears as a child prim in published linksets.
@@ -174,13 +176,19 @@ Design rules:
       (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
       live (would toggle a real script — do it with tapple present).
 - [x] `slsync scripts reset <item>` — `object.script.reset`. Same caveat.
-- [ ] `slsync tail [--object REF] [--kinds debug,error,update,compiled] [--jsonl]`
-      — connect and stream notifications as they arrive (runtime.debug/error are
-      broadcast to ALL connections for published objects; object.update filtered by
-      id when given); Ctrl-C to stop. **`--jsonl` is the agent mode** (one JSON
-      object per line on stdout) enabling tapple's planned workflow: agent writes a
-      script via `put`, then streams its llOwnerSay/debug output to unit-test it.
-      No MCP needed for this.
+- [x] `slsync tail [--object REF] [--kinds ...] [--jsonl] [--raw]` — connect and
+      stream events as they arrive (broadcast to ALL connections; no subscription
+      needed); Ctrl-C to stop. Display modes (tapple spec 2026-11-19, LIVE-VERIFIED):
+      - human (default): viewer-console style `[HH:MM:SS] ObjectName: message`
+      - `--jsonl`: one JSON object per line on stdout (agent mode; status → stderr)
+      - `--raw`: every wire frame exactly as received/sent, `[in]`/`[out]`-prefixed
+        full JSON-RPC both directions (protocol debugging; ignores --kinds/--object)
+      Kinds: debug,error (default), update, compiled, publish, unpublish. A running
+      tail also keeps the viewer's "Explore in IDE" button in direct-publish mode
+      (see B1). Enabling tapple's planned workflow: agent writes a script via `put`,
+      then streams its llOwnerSay/debug output to unit-test it. No MCP needed.
+      Remaining candidate: bounded tail (`--max-events N` / `--timeout T`) so agent
+      tool calls return — see Phase 5 design note.
 
 ### Phase 4 — Viewer commands ✅
 
@@ -308,6 +316,15 @@ Options for concern 1:
   both (2 owned per avatar, 2 not); both avatars in Equestrian (luau region).
   Alchemy suspected of websocket implementation bugs; tapple is preparing a bug
   report for Rye. **Record every anomaly observed during probing** (see below).
+- PippinGao is tapple's ALT; Pippin has edit permission on tapple's objects and
+  vice versa (so cross-ownership Explore-in-IDE works). Without edit perms the
+  button is greyed/unresponsive — matches source gating (`new_button_enabled`
+  requires `permModify`).
+- Persistent listeners (keep "Explore in IDE" working; see B1): one per viewer,
+  human mode, kinds debug,error,publish,unpublish → /tmp/tail-902{0,1}-human.txt.
+  Stop: `pkill -f "slsync.*tail"` (mind self-matching compound commands);
+  restart: `setsid nohup uv run slsync --url ws://127.0.0.1:90NN tail --kinds
+  debug,error,publish,unpublish > /tmp/tail-90NN-human.txt 2>/dev/null &`.
 - Viewer logs (great for debugging — they log every editor-server event, incl.
   `buildAndSendPublish`, `launchVSCode` failures): official =
   `~/.secondlife/logs/SecondLife.log`; Alchemy =
@@ -324,13 +341,16 @@ Options for concern 1:
 Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer.
 
 **Report status as of 2026-11-19 evening:**
-- Alchemy-specific, worth sending: **B2** (empty agent identity — A/B verified).
+- **This section is the master copy** (tapple: keep here until actually posted).
+- Alchemy-specific, worth sending: **B2** (empty agent identity — A/B verified),
+  **B6** (button label/style bug — tapple confirmed by observation; Rye's agent
+  to fix, code pointer included below).
 - Shared/by-design, optional UX gripe for Rye: B1 resolution (silent no-op when
   external editor can't launch; multi-select ignored) + B3/B4 (common to both
   viewers: server_time INT32_MIN, getStats counters zero — ask for semantics).
 - Official viewer report (tapple's own, separate): port-in-use crash on startup;
   ping `timestamp` echo truncated to int32 (B5); ping `server_time` INT32_MIN
-  (B3). The "Stop Exploring" label thing is NOT a bug — do not include.
+  (B3). The "Stop Exploring" label thing is NOT a bug on official — do not include.
 
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
@@ -479,3 +499,22 @@ silent no-op, by design in both codebases).
   interpreted as signed int32 (verified against the send time). Any real ms epoch
   overflows int32, so the official echo is always negative.
 - Alchemy (9020): echoes correctly as a 64-bit double (`1795071878704.0`).
+
+### B6. Alchemy: publish button's toggle state shows only as greyed colour; label never swaps (2026-11-19)
+- After a successful publish (client-connected path, see B1 verification), the
+  button's TOGGLE STATE is applied — pressed/dark-grey look (visible after
+  re-selecting the prim) — but its LABEL stays "Explore in IDE" and never swaps
+  to "Stop Exploring" as on the official viewer. The pressed colour is also
+  dark grey, unlike the bright blue used by other active toggle buttons in the
+  UI (tapple: purely a style/label bug).
+- Repro: with a websocket client connected (e.g. `slsync tail`), press Explore
+  in IDE on an editable prim → object publishes (verify via `objects list`) but
+  button text unchanged; re-selecting the prim reveals the pressed look.
+- Code pointer for Rye's agent: XUI defines `label_selected="Stop Exploring"`
+  (floater_tools.xml, `name="button publish"`, is_toggle=true), and
+  llpanelcontents.cpp `getState()` does
+  `mPublishButton->setToggleState(server && server->isObjectPublished(...))` —
+  but Alchemy additionally overwrites the base label on every refresh via
+  `mPublishButton->setLabel(getString(ide ? "ide_label" : "studio_label"))`
+  (official has no such setLabel call); that apparently suppresses the
+  selected-label swap and/or the active-colour styling.

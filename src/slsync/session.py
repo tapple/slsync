@@ -76,6 +76,7 @@ class HandshakeInfo:
 
 RequestHandler = Callable[[dict | None], Awaitable[Any] | Any]
 NotificationCallback = Callable[[str, dict | None], None]
+RawFrameCallback = Callable[[str, str], None]  # (direction "in"|"out", raw text)
 
 
 @dataclass
@@ -124,6 +125,9 @@ class ViewerSession:
         # Bounded log of notifications received (newest last).
         self.notifications: list[tuple[float, str, dict | None]] = []
         self.on_notification: NotificationCallback | None = None
+        # Optional hook for every wire frame, before parsing ("in") or
+        # after serialising ("out"). Used by `slsync tail --raw`.
+        self.on_raw_frame: RawFrameCallback | None = None
 
     # ------------------------------------------------------------- lifecycle
 
@@ -271,19 +275,19 @@ class ViewerSession:
             msg["params"] = params
         if mid is not None:
             msg["id"] = mid
-        await self._ws.send(json.dumps(msg))
+        await self._send_text(json.dumps(msg))
 
     async def _send_result(self, mid: int | None, result: Any) -> None:
         if self._ws is None or mid is None:
             return
-        await self._ws.send(
+        await self._send_text(
             json.dumps({"jsonrpc": "2.0", "id": mid, "result": result})
         )
 
     async def _send_error(self, mid: int | None, code: int, message: str) -> None:
         if self._ws is None or mid is None:
             return
-        await self._ws.send(
+        await self._send_text(
             json.dumps(
                 {
                     "jsonrpc": "2.0",
@@ -293,10 +297,24 @@ class ViewerSession:
             )
         )
 
+    async def _send_text(self, text: str) -> None:
+        """Send one wire frame, notifying the raw-frame hook first."""
+        if self.on_raw_frame is not None:
+            try:
+                self.on_raw_frame("out", text)
+            except Exception:
+                pass
+        await self._ws.send(text)
+
     async def _read_loop(self) -> None:
         assert self._ws is not None
         try:
             async for raw in self._ws:
+                if self.on_raw_frame is not None:
+                    try:
+                        self.on_raw_frame("in", raw)
+                    except Exception:
+                        pass
                 try:
                     msg = json.loads(raw)
                 except json.JSONDecodeError:
