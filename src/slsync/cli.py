@@ -603,8 +603,16 @@ def get(obj: Obj, item_ref: str, file: str | None) -> None:
 )
 @click.option("--run", "running", flag_value=True, default=None, help="Run the script after save.")
 @click.option("--no-run", "running", flag_value=False, help="Stop the script after save.")
+@click.option(
+    "--save-timeout",
+    default=SAVE_TIMEOUT,
+    show_default=True,
+    type=float,
+    help="Timeout in seconds for item creation and content save (viewer needs up to ~60 s).",
+)
 @click.pass_obj
-def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, running: bool | None) -> None:
+def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, running: bool | None,
+        save_timeout: float) -> None:
     """Upload a file to an object (scp-style).
 
     If NAME names an existing item in the prim, its content is replaced.
@@ -658,7 +666,8 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
                     params["vm"] = vm
                 if running is not None:
                     params["running"] = running
-                r = await _save_with_verify(s, prim["id"], existing["item_id"], params, content, obj)
+                r = await _save_with_verify(s, prim["id"], existing["item_id"], params, content, obj,
+                                            save_timeout=save_timeout)
                 return {"action": "updated", "item_id": existing["item_id"], **r}
 
             # Create the item first.
