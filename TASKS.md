@@ -308,6 +308,16 @@ Options for concern 1:
   both (2 owned per avatar, 2 not); both avatars in Equestrian (luau region).
   Alchemy suspected of websocket implementation bugs; tapple is preparing a bug
   report for Rye. **Record every anomaly observed during probing** (see below).
+- Viewer logs (great for debugging — they log every editor-server event, incl.
+  `buildAndSendPublish`, `launchVSCode` failures): official =
+  `~/.secondlife/logs/SecondLife.log`; Alchemy =
+  `~/.local/state/alchemynext/Alchemy.log`. Viewer sources: official checkout at
+  `../viewer` (v26.5.0, matches installed build), Alchemy built locally from
+  `../NewAlchemy` (build number changes on rebuild).
+- Test prim UUIDs (Equestrian, 2026-11-19): PippinGao's b8af6575-09a9-27e9-
+  3584-738de2a8336e, 689a7470-5030-b7f6-324b-36a90c4a436b; tapple's
+  e5f103bb-667f-c8c1-e4d9-0783dce9fcb8, 7a01ff67-47c2-d32f-24a4-ebe2819f8000
+  (TH AO).
 
 ## Viewer bug report notes (for Rye, started 2026-11-18)
 
@@ -317,18 +327,50 @@ behaved correctly in the same scenarios on 2026-11-17/18.
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
 ### B1. "Explore in IDE" → objects never appear in `object.list` (2026-11-19)
-- **Alchemy:** button text does not change (unlike official, which toggles to
-  "Stop Exploring"). Consistent with a broken button handler that never reaches
-  the state where it would toggle text or emit `object.request`.
-- **Official viewer:** ALSO empty after Explore-in-IDE button presses. Last night
-  (Nov 17/18) official DID show objects in list — this appears to be a regression
-  on the official build, OR there's a shared state variable that differs between
-  sessions.
-- Setup: initial test had 4 prims (2 owned + 2 not-owned per avatar). Follow-up
-  test with only owned prims confirmed same result on both viewers.
-- Alchemy (9020): `object.list` → empty despite button presses and protocol probes.
-- Official (9021): `object.list` → empty after button presses; works when driven
-  via `object.request` protocol.
+
+**RESOLVED — not a bug: by-design behaviour, identical in both viewers.**
+
+Root cause found in source (`llpanelcontents.cpp::onClickPublish`, same code in
+`~/cabbage/secondlife/viewer` [official] and `~/cabbage/secondlife/NewAlchemy`
+[Alchemy]):
+
+```cpp
+if (server->getConnectionCount())   // a websocket CLIENT is connected
+    → toggle publish directly       // works without VS Code
+else                                // no client connected
+    → launchVSCode(object_id)       // opens vscode://lindenlab.sl-vscode-plugin/connect?port=…&object=…
+```
+
+Today's button presses failed because BOTH preconditions were unmet:
+1. **No websocket client was connected** at press time (slsync not running)
+   → handler took the launchVSCode branch.
+2. **VS Code is not installed** (`code` not on PATH; Alchemy's ExternalEditor
+   setting points to missing `/usr/share/code/code`) → launch failed.
+
+Viewer logs prove it (both viewers, every button press):
+```
+WARNING LLProcess::launch : Could not locate 'code' on PATH -- launch will likely fail
+WARNING ScriptEditorWS launchVSCode : Failed to launch VS Code. …
+```
+…and ZERO `buildAndSendPublish` entries for any button press (only for our
+protocol probes).
+
+- Why it "worked" 2026-11-17: an agent session was actively connected via
+  slsync when the button was pressed → direct-publish branch. No client today →
+  VS Code branch → silent failure.
+- The official viewer's "Stop Exploring" label tapple saw was CORRECT state
+  reflection: after our protocol probe published her prims (08:21Z), the panel
+  refresh synced toggle state from `isObjectPublished()` = true. Not a bug.
+- Also found: the button only processes `getFirstRootObject()` — selecting 4
+  prims and clicking once only acts on ONE of them (no error, no feedback).
+- UX issues worth flagging to Rye (both viewers): silent failure when the
+  external editor can't launch (log-only warning); no indication which mode
+  (direct-publish vs launch-editor) applies; multi-select ignored.
+
+**How to make the button work on this machine:**
+1. Keep a websocket client connected — e.g. background `slsync tail --jsonl`
+   (persistent connection; also tapple's planned agent workflow), OR
+2. Install VS Code so `code` is on PATH (+ sl-vscode-plugin).
 - Related known Alchemy symptom from 2026-11-18: published objects drop from
   `gObjectList` after a while.
 - Next: tapple to provide the prim UUIDs out-of-band (Show-Object-uuid/key script
@@ -347,25 +389,20 @@ Log format per finding: date — method/call — expected vs actual — repro st
 | e5f103bb…9fcb8 | tapple (NOT owned by official) | ✅ published, listed | ✅ published, listed |
 | 7a01ff67…8000 | tapple (NOT owned by official) | ✅ published, listed (+inventory tree) | ✅ published, listed (+inventory tree) |
 
-**Conclusion: The bug is isolated to the "Explore in IDE" button path.**
-- `object.request` via protocol works perfectly on both viewers.
-- Ownership is irrelevant — non-owned prims published fine on both.
-- The button click handler either doesn't call `object.request`, calls it with wrong params,
-  or fails silently before the publish notification fires.
-- Alchemy's missing button-text toggle (B1 UI discrepancy) is consistent with a broken
-  button handler that never reaches the state where it would emit the request.
+**Conclusion: `object.request` via protocol works perfectly on both viewers; ownership is
+irrelevant (non-owned prims published fine on both).** The empty-list-after-button-press
+symptom was later root-caused to the button handler's no-client/no-VS-Code silent no-op —
+see B1 resolution below.
 
 #### Follow-up: owned-prims-only test (2026-11-19 ~08:20Z)
 
 Tapple restarted both viewers and published only owned prims (no ownership mix). Same result:
 - Both viewers' `object.list` stayed empty after Explore-in-IDE button presses (polled 60s).
-- **Official viewer regression:** last night (Nov 17/18) official DID show objects in list
-  after Explore in IDE. Today it does not — same symptom as Alchemy.
 - Protocol `object.request` still works perfectly on both viewers (confirmed via 2×2 probe).
 
-**Updated conclusion:** The "Explore in IDE" button path is broken on **both** viewers
-as of this session. The official viewer may have regressed, or there's a shared state
-variable that differs between sessions.
+**Superseded:** initially suspected an official-viewer regression; root cause instead
+found in the viewer source — see B1 resolution above (no-client + no-VS-Code =
+silent no-op, by design in both codebases).
 
 ### B2. Handshake reports empty agent identity despite logged-in avatar (2026-11-19)
 - `session.handshake` response: `agent_id: ""`, `agent_name: ""` while tapple's
