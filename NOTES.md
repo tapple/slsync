@@ -73,13 +73,22 @@ Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer
 Release v26.5.0.42122621216. Log format per finding: date — method/call —
 expected vs actual — repro steps.
 
-**Status as of 2026-11-19 evening:** final paste-ready text for both reports was
-handed to tapple in-session; she is sending them. Alchemy-specific: **B2**,
-**B6**. Shared/by-design context for Rye: B1 resolution (silent no-op UX), B3/B4
-(ask semantics). Official report items: port-in-use crash, ping `timestamp`
-int32 truncation (B5), ping `server_time` INT32_MIN (B3), silent compile errors,
-ItemRef.language wrong for Luau. The "Stop Exploring" label is NOT a bug on
-official — do not include it there.
+**Status (posted 2026-11-19):**
+- Official viewer report: POSTED by tapple —
+  https://feedback.secondlife.com/slua-alpha/p/bugs-with-the-lua-plugin-websocket
+  She merged the shared-bug items in and rewrote for readability. Her item 6 =
+  the Explore-in-IDE publish conditions (B1 resolution). Note: her first draft of
+  item 6's evidence lines cited the getStats counters, which are zero regardless
+  of state (that's the separate counters bug) — a corrected version citing
+  `object.list` + viewer log lines was handed back in-session.
+- Alchemy report: SENT to Rye (trimmed form: B2 + B6 + confirmed-working list +
+  pointer to this repo; shared bugs referenced via the official report link).
+
+Original item inventory for reference — Alchemy-specific: **B2**, **B6**.
+Shared/by-design context: B1 resolution (silent no-op UX), B3/B4 (ask semantics).
+Official items: port-in-use crash, ping `timestamp` int32 truncation (B5), ping
+`server_time` INT32_MIN (B3), silent compile errors, ItemRef.language wrong for
+Luau. The "Stop Exploring" label is NOT a bug on official — do not include it there.
 
 ### B1. "Explore in IDE" → objects never appear in `object.list` (2026-11-19)
 

@@ -62,7 +62,7 @@ Collaborator: tapple (she/her). Announce before every live probe.
       scripts), NOT an object inventory. LIVE-SMOKE-TESTED.
 - [x] `slsync scripts start|stop <item>` — `object.script.set_running`
       (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
-      live (would toggle a real script — do it with tapple present).
+      live (would toggle a real script — do it with tapple present). See FOLLOWUPS.md F1.
 - [x] `slsync scripts reset <item>` — `object.script.reset`. Same caveat.
 - [x] `slsync tail [--object REF] [--kinds ...] [--jsonl] [--raw] [--all]` — stream
       events (broadcast to ALL connections; no subscription needed). Display modes:
@@ -77,6 +77,7 @@ Collaborator: tapple (she/her). Announce before every live probe.
 - [x] `slsync commands run <command> [--param k=v ...] [--json-params ...]` —
       `command.execute` with capability gate. Implemented; not exercised live
       (teleport/focus would move tapple's avatar — do it with her present).
+      See FOLLOWUPS.md F2.
 - [ ] Optional: typed shortcuts (`slsync teleport <uuid>` etc.) if desired
 
 ### Phase 5 — Agent ergonomics (optional, later)
