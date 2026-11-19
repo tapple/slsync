@@ -882,11 +882,25 @@ TAIL_KINDS = ("debug", "error", "update", "compiled", "publish", "unpublish")
 DEFAULT_TAIL_KINDS = ("debug", "error")
 
 
-def _fmt_tail_line(kind: str, params: dict) -> str:
+def _use_color() -> bool:
+    """ANSI colours only on a terminal, and never when NO_COLOR is set."""
+    return sys.stdout.isatty() and os.environ.get("NO_COLOR") is None
+
+
+def _paint(text: str, code: str, color: bool) -> str:
+    return f"\x1b[{code}m{text}\x1b[0m" if color else text
+
+
+def _fmt_tail_line(kind: str, params: dict, color: bool = False) -> str:
     ts = time.strftime("%H:%M:%S")
     if kind == "runtime.debug":
         # Viewer-console style: [HH:MM:SS] ObjectName: message
-        return f"[{ts}] {params.get('object_name', '?')}: {params.get('message', '')}"
+        # Colours mirror the viewer's console: owner_say yellow, debug red.
+        code = "33" if params.get("channel") == "owner_say" else "31"
+        return _paint(
+            f"[{ts}] {params.get('object_name', '?')}: {params.get('message', '')}",
+            code, color,
+        )
     if kind == "runtime.error":
         line = (
             f"[{ts}] ERR  {params.get('object_name', '?')} "
@@ -894,7 +908,12 @@ def _fmt_tail_line(kind: str, params: dict) -> str:
         )
         for frame in (params.get("stack") or [])[1:]:
             line += f"\n       at {frame}"
-        return line
+        # Luau errors are fatal to the script: white on red. item.language is
+        # unreliable (reports lsl), so detect via the lua_script stack frames.
+        is_luau = "lua_script:" in (params.get("message") or "") or any(
+            f.startswith("lua_script:") for f in (params.get("stack") or [])
+        )
+        return _paint(line, "41;97" if is_luau else "31", color)
     if kind == "object.update":
         what = []
         if params.get("inventory") is not None:
@@ -906,26 +925,32 @@ def _fmt_tail_line(kind: str, params: dict) -> str:
             what.append("linkset")
         if params.get("object_name") is not None:
             what.append("name")
-        return f"[{ts}] UPD  {params.get('object_id', '?')} ({', '.join(what) or '?'})"
+        # System kinds (not produced by any script): light grey.
+        return _paint(
+            f"[{ts}] UPD  {params.get('object_id', '?')} ({', '.join(what) or '?'})",
+            "90", color,
+        )
     if kind == "script.compiled":
         diag = params.get("diagnostics") or []
         extra = "; ".join(f"{d.get('level')}: {d.get('message')}" for d in diag[:3])
-        return (
+        return _paint(
             f"[{ts}] CMP  script {params.get('script_id', '?')}: "
             f"compiled={'yes' if params.get('success') else 'NO'} running={params.get('running')}"
-            + (f" [{extra}]" if extra else "")
+            + (f" [{extra}]" if extra else ""),
+            "90", color,
         )
     if kind == "object.publish":
         o = params.get("object") or {}
         n = len(o.get("linked_objects") or [])
-        return (
+        return _paint(
             f"[{ts}] PUB  {o.get('object_name') or o.get('object_id', '?')} "
             f"[{o.get('object_id', '?')}]"
-            + (f" ({n} linked prim(s))" if n else "")
+            + (f" ({n} linked prim(s))" if n else ""),
+            "90", color,
         )
     if kind == "object.unpublish":
         reason = f" ({params['reason']})" if params.get("reason") else ""
-        return f"[{ts}] UNPUB {params.get('object_id', '?')}{reason}"
+        return _paint(f"[{ts}] UNPUB {params.get('object_id', '?')}{reason}", "90", color)
     return f"[{ts}] {kind} {json.dumps(params)}"
 
 
@@ -941,12 +966,21 @@ def _fmt_tail_line(kind: str, params: dict) -> str:
 @click.option(
     "--raw",
     is_flag=True,
-    help="Print every wire frame exactly as received/sent, prefixed [in]/[out] "
-    "(full JSON-RPC traffic both directions; protocol debugging). "
+    help="Print every wire frame of THIS connection exactly as received/sent, "
+    "[in]/[out]-prefixed (handshake + own calls), plus ALL broadcast "
+    "notifications from any source. Sibling connections' request/response pairs "
+    "are NOT visible (they go only to that connection). Protocol debugging. "
     "Ignores --kinds/--jsonl/--object.",
 )
+@click.option(
+    "--all",
+    "all_kinds",
+    is_flag=True,
+    help="Show every kind, incl. system events (alias for --kinds=debug,error,update,compiled,publish,unpublish).",
+)
 @click.pass_obj
-def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool) -> None:
+def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool,
+         all_kinds: bool) -> None:
     """Stream events from the viewer's editor WebSocket until Ctrl-C.
 
     The viewer broadcasts notifications to ALL connected clients, so this
@@ -963,12 +997,17 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool) -
 
     Kinds (default: debug,error): debug, error, update, compiled, publish,
     unpublish. 'compiled' events carry no object id and bypass --object.
+    --all shows every kind; system kinds render light grey.
+
+    Colours (terminal only; NO_COLOR disables): owner_say yellow, debug red,
+    errors red (Luau errors white-on-red — fatal to the script), system
+    events light grey. Mirrors the viewer's console colouring.
 
     Examples:
       slsync tail                          # watch script output of explored objects
       slsync tail --object "TH AO"         # one object, by name or UUID
+      slsync tail --all                    # everything, incl. system events
       slsync tail --jsonl > events.jsonl & # agent: capture in background
-      slsync tail --kinds debug,error,publish   # also see objects (re)publishing
     """
     if raw and jsonl:
         raise click.ClickException("--raw and --jsonl are mutually exclusive")
@@ -976,6 +1015,8 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool) -
     bad = kind_set - set(TAIL_KINDS)
     if bad:
         raise click.ClickException(f"unknown kinds: {', '.join(sorted(bad))}")
+    if all_kinds:
+        kind_set = set(TAIL_KINDS)
 
     def make_session() -> ViewerSession:
         s = _session(obj)
@@ -1013,7 +1054,7 @@ def tail(obj: Obj, object_ref: str | None, kinds: str, jsonl: bool, raw: bool) -
             if jsonl:
                 click.echo(json.dumps({"ts": time.time(), "kind": kind, **params}), err=False)
             else:
-                click.echo(_fmt_tail_line(method, params))
+                click.echo(_fmt_tail_line(method, params, color=_use_color()))
 
         s.on_notification = on_notification
         return s

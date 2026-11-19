@@ -146,6 +146,25 @@ Design rules:
 - Sim renames duplicate names ("ground-script" → "ground-script 1"); new LSL
   scripts are seeded with the default template; new notecards are empty (null asset).
 - The avatar sitting on an object appears as a child prim in published linksets.
+- (2026-11-19 protocol probes, official viewer) `runtime.debug` channels that
+  actually arrive: `owner_say` (llOwnerSay) and `debug` (llSay DEBUG_CHANNEL).
+  llSay(PUBLIC_CHANNEL) does NOT arrive — the protocol only exposes those two
+  channels. Delivery follows CHAT OWNERSHIP: a message is relayed only by the
+  viewer whose avatar receives the chat (llOwnerSay on Pippin's prim reached
+  only PippinGao's viewer; tapple's Alchemy tail saw nothing) — cross-viewer
+  capture needs a message addressed to that avatar.
+- Luau runtime errors (`error("...")` in a .luau script): arrive as
+  `runtime.error` with the short text in `error`, the FULL viewer-console text
+  in `message` ("Object [script:name] Script run-time error\nlua_script:1: ..."),
+  and lua_script frames in `stack`. The spec's ItemRef.language field is
+  UNRELIABLE — it reported "lsl" for the Luau script (object.list correctly
+  shows vm=luau); slsync detects Luau via the lua_script markers.
+- Compile errors are SILENT over the protocol: saving a syntactically invalid
+  script (`]`) returns success:true with NO compiled field/diagnostics, and no
+  `script.compiled` notification arrives. (Spec promises inline diagnostics.)
+- Transient empty inventory view recurred on the OFFICIAL viewer too (right
+  after item deletes) — the stale/empty local inventory quirk is common to
+  both viewers; re-fetch before acting.
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued
@@ -165,6 +184,11 @@ Design rules:
   3. Ask Rye (Alchemy author) — tapple is in regular contact with him.
   4. An MCP-style buffer could capture notifications that arrive while no agent is
      watching (see Phase 5 design note).
+- (tapple 2026-11-19, pro-MCP argument for the record) separate CLI connections
+  each see only their OWN request/response pairs; broadcasts reach everyone.
+  A single persistent MCP connection would have full protocol visibility —
+  including the viewer's responses to sibling calls — in one place. Weigh this
+  against the CLI-only decision (Decisions #2) if debugging needs grow.
 
 ### Phase 3 — Scripts & runtime events ✅
 
@@ -183,10 +207,14 @@ Design rules:
       - `--jsonl`: one JSON object per line on stdout (agent mode; status → stderr)
       - `--raw`: every wire frame exactly as received/sent, `[in]`/`[out]`-prefixed
         full JSON-RPC both directions (protocol debugging; ignores --kinds/--object)
-      Kinds: debug,error (default), update, compiled, publish, unpublish. A running
-      tail also keeps the viewer's "Explore in IDE" button in direct-publish mode
-      (see B1). Enabling tapple's planned workflow: agent writes a script via `put`,
-      then streams its llOwnerSay/debug output to unit-test it. No MCP needed.
+      Kinds: debug,error (default), update, compiled, publish, unpublish;
+      --all = every kind. Colours on a TTY only (NO_COLOR disables; files stay
+      clean): owner_say yellow, debug red, errors red, Luau errors white-on-red
+      (fatal to the script), system kinds light grey — mirrors the viewer console.
+      A running tail also keeps the viewer's "Explore in IDE" button in
+      direct-publish mode (see B1). Enabling tapple's planned workflow: agent
+      writes a script via `put`, then streams its llOwnerSay/debug output to
+      unit-test it. No MCP needed.
       Remaining candidate: bounded tail (`--max-events N` / `--timeout T`) so agent
       tool calls return — see Phase 5 design note.
 
@@ -334,7 +362,11 @@ Options for concern 1:
 - Test prim UUIDs (Equestrian, 2026-11-19): PippinGao's b8af6575-09a9-27e9-
   3584-738de2a8336e, 689a7470-5030-b7f6-324b-36a90c4a436b; tapple's
   e5f103bb-667f-c8c1-e4d9-0783dce9fcb8, 7a01ff67-47c2-d32f-24a4-ebe2819f8000
-  (TH AO).
+  (TH AO). All three non-AO prims are named "Object" (the SL default name —
+  not a slsync fallback).
+- Scratch test scripts used 2026-11-19 for protocol probes (all deleted after):
+  llOwnerSay/llSay channel script, `error("...")` Luau script, `]` compile-error
+  script — see live-testing findings above.
 
 ## Viewer bug report notes (for Rye, started 2026-11-18)
 
@@ -350,7 +382,10 @@ Viewer under test: Alchemy Test v26.4.0.68225. Comparison: official SL viewer.
   viewers: server_time INT32_MIN, getStats counters zero — ask for semantics).
 - Official viewer report (tapple's own, separate): port-in-use crash on startup;
   ping `timestamp` echo truncated to int32 (B5); ping `server_time` INT32_MIN
-  (B3). The "Stop Exploring" label thing is NOT a bug on official — do not include.
+  (B3); NEW from 2026-11-19 protocol probes: ItemRef.language reports "lsl" for
+  Luau scripts in runtime.error; no compile diagnostics/notification for a
+  syntactically invalid save. The "Stop Exploring" label thing is NOT a bug on
+  official — do not include.
 
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
