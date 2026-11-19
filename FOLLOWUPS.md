@@ -21,12 +21,12 @@ Still worth verifying with tapple present (low priority):
    that's what happens and whether that's desirable UX.
 
 ### F1. `slsync scripts start|stop|reset` never exercised live (debt since Phase 3)
-Implemented but untested — they toggle real scripts, so only with tapple present.
-Suggested flow: put a trivial llOwnerSay scratch script → `scripts start/stop`
-→ watch the tail output stop/resume → clean up.
+**RESOLVED 2026-11-19**: Start/stop WORK — script output starts/stops via tail.
+BUT: `--wait-update` does NOT work (no `object.update` notification arrives).
+Inventory re-fetch also unreliable. Verified with a simple llOwnerSay timer script.
+See NOTES.md for details.
 
 ### F2. `slsync commands run` never exercised live (debt since Phase 4)
-Implemented but untested — teleport/focus move tapple's avatar; only with her
-present and in-world attention. Check `commands list` first for a harmless
-command to start with.
+**RESOLVED 2026-11-19**: Tested `viewer.camera.focus` — works fine, camera zooms
+to the target object. Teleport and other disruptive commands NOT tested.
 
