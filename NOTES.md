@@ -56,6 +56,30 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   notification arrives for these operations, so we can't confirm the state change.
   Inventory re-fetch after a delay also doesn't reliably reflect the new state (stale
   view). For verification, rely on observing actual script output via tail.
+- (2026-11-19 evening, compile-error diagnosis; full handoff in FOLLOWUPS.md F4)
+  Viewer A/B on `object.content.save` of a syntactically invalid script:
+  - Alchemy 26.4.0.68225 (9020): inline `compiled: no` + diagnostics for BOTH
+    bad LSL and bad Luau.
+  - Official Release 26.5.0.42122621216 (9021): inline diagnostics for bad LUAU
+    only; bad LSL → the save call gets NO response at all (client timeout; slsync
+    falls back to read-back: "viewer did not confirm compilation", exit 0).
+  - `script.compiled` broadcast notification never observed on either viewer,
+    success or failure (raw-wire proof still pending — F4 step 3).
+- **NEW BUG (suspected, official 26.5.0): `object.item.create` returned a
+  pre-existing unrelated item as its result.** During a live test run the create
+  response carried item_id/name of an existing item (test-official-good) while the
+  genuinely new item (live-bad-luau-*) appeared in inventory; slsync's name filter
+  was active, so the response itself was wrong. Correlates with a preceding hung
+  bad-LSL save (dangling compile-wait); solo runs pass. Wire-capture repro
+  pending (F7). Related: the documented "Item was not found in updated
+  inventory" race and this wrong-id response are likely two faces of the same
+  unreliable post-creation inventory check.
+- slsync hardening (uncommitted, F5): `put --save-timeout`; create-race workaround
+  name-filters candidates (`_is_sim_rename`) — the old code overwrote an UNRELATED
+  item when the viewer's inventory snapshot was stale/empty (observed live, both
+  viewers); pre-create snapshot guard rejects create responses referencing a
+  pre-existing id. Live integration tests added (tests/test_live.py, `live`
+  marker, skip-when-unavailable — not a hard gate per tapple).
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued
