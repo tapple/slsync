@@ -35,13 +35,19 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   and lua_script frames in `stack`. The spec's ItemRef.language field is
   UNRELIABLE — it reported "lsl" for the Luau script (object.list correctly
   shows vm=luau); slsync detects Luau via the lua_script markers.
-- Compile errors are SILENT over the protocol: saving a syntactically invalid
-  script (`]`) returns success:true with NO compiled field/diagnostics, and no
-  `script.compiled` notification arrives. (Spec promises inline diagnostics.)
-  Related known upstream issue (closed as expected, NOT re-reporting): scripts
-  that failed compilation forget their intended VM — our bad-test script showed
-  vm=mono after its compile failure:
-  https://feedback.secondlife.com/slua-alpha/p/scripts-with-a-compiler-error-forget-their-vm
+- Compile errors: PARTIALLY FIXED (2026-11-19). Inline diagnostics on `object.content.save`
+  response now WORK — returns `compiled: no` with error messages (e.g. "ERROR line
+  1: Syntax error"). This was previously broken (returned success:true with NO compiled
+  field/diagnostics). HOWEVER, the `script.compiled` notification still does NOT arrive
+  over the broadcast channel when compilation fails. So: inline diagnostics = fixed;
+  notification = still missing. (Related upstream issue about VM reset on compile
+  failure remains valid: scripts that failed compilation forget their intended VM —
+  see https://feedback.secondlife.com/slua-alpha/p/scripts-with-a-compiler-error-forget-their-vm)
+- F1 test result (2026-11-19): `scripts start|stop` WORK — script output starts/stops
+  as expected via tail. HOWEVER, `--wait-update` does NOT work: no `object.update`
+  notification arrives for these operations, so we can't confirm the state change.
+  Inventory re-fetch after a delay also doesn't reliably reflect the new state (stale
+  view). For verification, rely on observing actual script output via tail.
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued
