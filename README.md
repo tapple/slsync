@@ -16,7 +16,7 @@ uv run slsync status       # viewer identity, ping, stats
 ```
 
 The viewer must be running with its editor WebSocket server enabled
-(default `ws://127.0.0.1:9020`; override with `--url` or `RIDERCLI_URL`).
+(default `ws://127.0.0.1:9020`; override with `--url` or `SLSYNC_URL`).
 
 ## Everyday usage
 

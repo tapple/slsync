@@ -142,10 +142,31 @@ Design rules:
 - Sim renames duplicate names ("ground-script" → "ground-script 1"); new LSL
   scripts are seeded with the default template; new notecards are empty (null asset).
 - The avatar sitting on an object appears as a child prim in published linksets.
+- (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
+  caused by the ~646-item count per se: the SL viewer has historically been bad at
+  displaying prim inventories with hundreds of items (old UDP-era bug: queued
+  inventory requests whose delay grew exponentially as the session aged, waits
+  reaching hours; improved after the switch to HTTP/CAP-based prim inventory —
+  ~2 years before the websocket existed). Precedent that the viewer's local
+  prim-inventory view can simply be unreliable. Candidate workarounds for a
+  reliable inventory channel:
+  1. **In-prim script as second channel** (tapple-approved scratch-script use, see
+     Decisions #4): a script can list/delete inventory and show perms/types more
+     reliably than the viewer; could serve paged JSON over llHttpRequest (LSL or
+     SLua). Luau allows 32 KB HTTP replies vs LSL's 16 KB. Open: does the websocket
+     server only run in luau-enabled regions? (unverified; all regions go luau
+     within ~3 months anyway)
+  2. Fix the viewer's websocket/inventory code ourselves.
+  3. Ask Rye (Alchemy author) — tapple is in regular contact with him.
+  4. An MCP-style buffer could capture notifications that arrive while no agent is
+     watching (see Phase 5 design note).
 
 ### Phase 3 — Scripts & runtime events ✅
 
-- [x] `slsync scripts list` — `script.list` (temp dir + subscribed script ids). LIVE-SMOKE-TESTED.
+- [x] `slsync scripts list` — `script.list`: the viewer's live-sync temp dir + all
+      scripts currently *subscribed* (open in an editor session, across all
+      connections) — i.e. editor-session state, NOT an object inventory.
+      LIVE-SMOKE-TESTED.
 - [x] `slsync scripts start|stop <item>` — `object.script.set_running`
       (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
       live (would toggle a real script — do it with tapple present).
@@ -174,29 +195,49 @@ via bash as long as `--help` is good and `--json` exists.
 - [ ] Optional: a short skill/markdown doc for agents covering the non-obvious
       workflows (explore-before-address, name addressing rules, dispatched-not-applied)
 
+#### tail-for-agents design note (tapple 2026-11-18 + agent analysis)
+
+Concern (tapple): `slsync tail` never completes by design, but agents need tool
+calls to return before they can reason about results. Options:
+
+- **Bounded tail (proposed next step)**: add `--max-events N` and/or `--timeout T`
+  to `tail`, exit 0 when reached. Agent workflow becomes: put script → start →
+  bounded `tail --jsonl` → assert on lines → stop. No new infrastructure; fits the
+  CLI-only decision. (Clumsy zero-code alternative that works today: background
+  `tail --jsonl > file &` and read the file in a later step.)
+- **MCP server (`slsync mcp`)**: proper home for a persistent buffer with sequence
+  numbers + "events since last seq" tools, and for consolidating multiple agents.
+  BUT pi requires MCP servers to be configured *before* session start
+  (`~/.pi/agent/mcp.json` / `.pi/mcp.json`; no mid-session registration), so an
+  agent cannot spawn-and-connect its own server on demand — it would be a
+  user-configured daemon. Also: the protocol already broadcasts notifications to
+  ALL concurrent connections, so N agents each running their own `tail` needs no
+  consolidation for read-only streaming; a shared buffer only pays off for
+  coordination/audit. Context: tapple can fit ~4 models in RAM at once and hasn't
+  used subagents yet.
+
 ### Phase 6 — Docs & polish
 
 - [ ] README.md: setup (`uv sync`), usage examples, how to enable the server in the
       viewer, security note (local-only, challenge file)
 - [ ] `slsync --help` text for every command; consistent error messages
-- [ ] Optional: `RIDERCLI_URL` env var already supported — document it
+- [x] `SLSYNC_URL` env var (was `RIDERCLI_URL`; the rename's case-sensitive sed
+      missed the uppercase form — fixed 2026-11-18); documented in README
 
-## Morning checklist for tapple (after unattended night work)
+## Morning checklist for tapple (after unattended night work) — resolved 2026-11-18
 
-1. In-world check of the TH AO object: confirm its 4 scripts are intact and that
-   `slsync-put-test` notecard is gone (deletes were dispatched; the viewer's local
-   inventory view was flaky/stale at times tonight, so verify visually).
-2. Ground test object `ec45a12a`: should be empty again (all slsync items deleted;
-   `ground-script 1` delete succeeded on retry). It may still have your linked second
-   prim + you sitting on it.
-3. Untested live (deliberately, while you were asleep): scripts start/stop/reset,
-   commands run (teleport/focus/save-back), items rename/describe/perms. Suggested:
-   `slsync put` a trivial llOwnerSay script to the ground object, then
-   `slsync tail --object ec45a12a... --jsonl` in one terminal and
-   `slsync scripts start|stop ...` in another — that also validates the planned
-   agent unit-testing workflow.
-4. If image pasting still fails after this work: restart pi so it re-reads the fixed
-   models.json (`input: ["text","image"]` added for unsloth/Qwen3.8-27B-GGUF).
+1. ✅ CONFIRMED by tapple: AO scripts intact, no stray notecards seen (checked 2 of 4
+   before closing the viewer).
+2. ✅ CONFIRMED: ground prim was empty; tapple was still sitting on it.
+3. ⏳ RESUME: tapple will create a new test object and expose it. NOTE: tapple is
+   logged into the **Alchemy viewer** for this round — remember its known quirks
+   (empty `agent_id`, published objects drop from `gObjectList` after a while).
+   Untested-live list unchanged: scripts start/stop/reset, commands run
+   (teleport/focus/save-back), items rename/describe/perms. Suggested flow: `put`
+   a trivial llOwnerSay script → bounded `tail --jsonl` → `scripts start|stop`.
+4. ⏸ DEFERRED: the models.json image-input fix was lost in the botched restart;
+   tapple wants a permanent fix (may move from unsloth studio toward lemonade —
+   the fix may become moot).
 
 ## Decisions (tapple)
 
@@ -204,17 +245,35 @@ via bash as long as `--help` is good and `--json` exists.
    scp-style get/put for notecards and scripts is a must-have (Phase 2).
 2. **CLI only** — no MCP server. Optional agent skill doc later (Phase 5).
 3. Announce before every live probe (tapple may have things turned off in-world).
+4. **Scratch items permitted** on objects tapple exposes: notecards freely; scripts
+   limited to llOwnerSay (LSL) / print(SLua) output, plus inventory-probing scripts
+   as a second channel (see live-testing findings). The test scripts tapple wrote
+   are acceptable reference material. tapple can help fix LSL/SLua if web search
+   fails (the model is likely weak on LSL and blind to SLua — post-cutoff).
+5. Null-asset notecards: tapple saw none in the first `put` test; later ones went
+   unchecked. An in-prim script could check automatically (open item from
+   checklist 3).
 
 ## Open questions for tapple
 
-1. **Test object** — which in-world object should I use for live testing? Easiest:
-   click "Explore in IDE" on it in the viewer (it then appears in `object.list`),
-   or give me its UUID for `objects explore`. Is it OK to create/delete a scratch
-   notecard on it while testing?
-2. **agent_name came back empty** in the handshake — is your avatar actually
-   logged into a region when you test? (Some calls may behave differently.)
-3. Anything you expect from a "rider" workflow that isn't covered above
-   (e.g. searching objects by name, bulk operations)?
+1. ✅ RESOLVED 2026-11-18: tapple will create a new test object and expose it;
+   scratch items permitted per Decisions #4. Currently on the Alchemy viewer.
+2. **agent_name came back empty** in the handshake — tapple suspects correlation
+   with standing in a luau-enabled region or not (was logged into SL the whole
+   time). Testable: compare handshake `agent_name` across regions.
+3. ✅ ANSWERED 2026-11-18: see "Planned use cases" below.
+
+## Planned use cases (tapple, 2026-11-18)
+
+- **Agent reads + edits notecards**: LLM understands notecard content and edits it
+  based on external data tapple provides. Some prims hold *hundreds* of notecards —
+  bulk listing/get is the hot path.
+- **Manual disk↔prim script copy** (scp-style get/put already covers this). Naming
+  conventions differ: disk = static name + file extension; prim = prefix + version
+  number, no extension. sl-vscode-plugin's `-- @file` / `// @file` comment
+  annotation (in-script pointer to the on-disk path) is a candidate convention for
+  future put/get mapping — parked, not needed yet.
+- Preprocessor for modularized scripts: explicitly out of scope for slsync.
 
 ## Testing notes
 

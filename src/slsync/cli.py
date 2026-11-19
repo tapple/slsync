@@ -79,7 +79,7 @@ def _resolve_prim_or_die(objs: list[dict], address: str):
     "--url",
     default=DEFAULT_URL,
     show_default=True,
-    envvar="RIDERCLI_URL",
+    envvar="SLSYNC_URL",
     help="WebSocket URL of the viewer's editor server.",
 )
 @click.option(
