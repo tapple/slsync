@@ -8,6 +8,8 @@ Protocol spec: [`external-editor-json-rpc.md`](./external-editor-json-rpc.md)
 `../sl-vscode-plugin` (TypeScript, esp. `src/synchservice.ts` and
 `packages/sl-ide-ws-client/`).
 
+Collaborator: tapple (she/her).
+
 ## How it works (verified against a live viewer)
 
 - The **viewer runs the WebSocket server**; we connect as a plain client to
@@ -153,9 +155,10 @@ Design rules:
   1. **In-prim script as second channel** (tapple-approved scratch-script use, see
      Decisions #4): a script can list/delete inventory and show perms/types more
      reliably than the viewer; could serve paged JSON over llHttpRequest (LSL or
-     SLua). Luau allows 32 KB HTTP replies vs LSL's 16 KB. Open: does the websocket
-     server only run in luau-enabled regions? (unverified; all regions go luau
-     within ~3 months anyway)
+     SLua). Luau allows 32 KB HTTP replies vs LSL's 16 KB. Region requirement
+     partially verified 2026-11-19: websocket works fine in a luau-enabled region
+     (Equestrian); non-lua behaviour untested and moot — all regions go luau
+     within ~3 months.
   2. Fix the viewer's websocket/inventory code ourselves.
   3. Ask Rye (Alchemy author) — tapple is in regular contact with him.
   4. An MCP-style buffer could capture notifications that arrive while no agent is
@@ -300,10 +303,11 @@ Options for concern 1:
   notecards — by design).
 - Challenge file lands in the viewer's tmpdir as `sl_script_challenge_<uuid>.tmp`.
 - Announce before every live probe (tapple may have things turned off in-world).
-- 2026-11-18: tapple exposed **2 prims** via the protocol on 9020 for testing.
-  Viewer is **Alchemy**, suspected of websocket implementation bugs — tapple has
-  already seen a UI discrepancy in what "Explore in IDE" does and is preparing a
-  bug report for Rye. **Record every anomaly observed during probing** (see below).
+- 2026-11-19: A/B setup — Alchemy Test v26.4.0.68225 on **9020**, official SL
+  viewer on **9021** (`slsync --url ws://127.0.0.1:9021`); same 4 prims explored in
+  both (2 owned per avatar, 2 not); both avatars in Equestrian (luau region).
+  Alchemy suspected of websocket implementation bugs; tapple is preparing a bug
+  report for Rye. **Record every anomaly observed during probing** (see below).
 
 ## Viewer bug report notes (for Rye, started 2026-11-18)
 
@@ -312,23 +316,31 @@ behaved correctly in the same scenarios on 2026-11-17/18.
 
 Log format per finding: date — method/call — expected vs actual — repro steps.
 
-### B1. "Explore in IDE" → object never appears in `object.list` (2026-11-19)
-- tapple exposed 2 prims via the viewer UI; he also reports a UI discrepancy in
-  what that button does on his end (details TBC).
-- `object.list` (no params) → empty list, though 2 objects should be published.
-- Same flow worked correctly on the official SL viewer (explored objects appeared
-  and stayed listed).
+### B1. "Explore in IDE" → objects never appear in Alchemy's `object.list` (2026-11-19)
+- UI discrepancy (tapple's repro for Rye): on the official viewer, pressing
+  "Explore in IDE" changes the button text to **"Stop Exploring"**; on Alchemy the
+  button text does not change.
+- Setup: the SAME 4 prims selected + Explore-in-IDE pressed in BOTH viewers; each
+  avatar exposes 2 prims it owns and 2 it doesn't (ownership mix untested, possibly
+  buggy on both). Both avatars logged into Equestrian (a luau region).
+- Alchemy (9020): `object.list` → empty despite the 4 explored prims.
+- Official (9021): **ALSO empty** as of 2026-11-19 ~07:35Z (polled every 10 s for
+  ~60 s, no change) — differs from 2026-11-17/18 when explored objects appeared.
+  New variable this round: the ownership mix (2 not-owned prims per avatar).
 - Related known Alchemy symptom from 2026-11-18: published objects drop from
   `gObjectList` after a while.
-- Open: need one prim UUID to test `object.request` directly (isolate button path
-  vs whole publish pipeline) + tapple's exact repro of the UI discrepancy.
+- Next: tapple to provide the prim UUIDs out-of-band (Show-Object-uuid/key script
+  or inspect), then drive `object.request` directly per UUID against BOTH viewers →
+  2×2 matrix {9020, 9021} × {owned, not-owned} isolates button path vs publish
+  pipeline vs ownership. Results appended below.
 
 ### B2. Handshake reports empty agent identity despite logged-in avatar (2026-11-19)
 - `session.handshake` response: `agent_id: ""`, `agent_name: ""` while tapple's
   avatar is logged into a region (Alchemy). Official SL viewer returned real
   values in the same scenario.
-- tapple hypothesis: may correlate with luau-enabled regions — untestable so far
-  because Alchemy returns empty regardless.
+- A/B 2026-11-19, both avatars in Equestrian (luau region): official reports
+  `agent_name: "PippinGao"` + UUID; Alchemy still empty → luau-region hypothesis
+  ruled out; this is an Alchemy-specific bug.
 
 ### B3. `system.ping` response `server_time` = -2147483648 (INT32_MIN) (2026-11-19)
 - Every ping: `"server_time": -2147483648` — exact int32 min, looks like an
@@ -336,6 +348,11 @@ Log format per finding: date — method/call — expected vs actual — repro st
 - The server clearly knows its own time: `system.getStats.uptime` advanced
   correctly between calls (07:01:58Z → 07:04:38Z), so not a clock issue.
   (Side note: that field is named "uptime" but reports current server time.)
+- **A/B (2026-11-19): the official viewer returns the SAME -2147483648** — common
+  to both viewers (unimplemented field?), not Alchemy-specific.
+- Context (tapple): the viewer UI displays server time in PST; protocol timestamp
+  fields are UTC ISO-8601 with Z — whether the protocol conveys timezone at all is
+  unknown.
 
 ### B4. `system.getStats` counters stuck at zero (2026-11-19, possibly by design)
 - After ~8 successful calls across 2 connections, `total_requests_handled: 0`
@@ -343,3 +360,11 @@ Log format per finding: date — method/call — expected vs actual — repro st
   alone should make the latter ≥ 2 if it counts notifications).
 - Same response: `global_method_count: 1` despite many advertised methods.
 - getStats is undocumented — flag all three for Rye's clarification.
+
+### B5. Official viewer truncates ping `timestamp` echo to signed int32 (2026-11-19)
+- Spec: `timestamp` = "The original timestamp from the request, echoed by the
+  editor server." We send a ms epoch (~1.795e12).
+- Official (9021): echo came back as `-222971890` — exactly our value mod 2^32
+  interpreted as signed int32 (verified against the send time). Any real ms epoch
+  overflows int32, so the official echo is always negative.
+- Alchemy (9020): echoes correctly as a 64-bit double (`1795071878704.0`).
