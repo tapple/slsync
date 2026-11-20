@@ -121,7 +121,7 @@ or an installed entrypoint via `uv tool install`); keep repo scripts
 Tapple: "I need to stop just vibecoding this tool" — pair with a proper test/
 docs pass rather than ad-hoc live poking.
 
-### F5. Timeout knobs are inconsistent (noted 2026-11-19, from --save-timeout review)
+### F5. Timeouts & wait semantics are inconsistent (noted 2026-11-19)
 Three knobs cover disjoint scopes: `--connect-timeout` (connect+handshake),
 `--timeout` (all other calls), `put --save-timeout` (create+save inside put). Gaps:
 `slsync get` and the read-back in `_save_with_verify` use a hardcoded GET_TIMEOUT=45 s
@@ -129,6 +129,16 @@ ignoring `--timeout`; standalone `items create` times its item.create with `--ti
 while put's create path uses `--save-timeout`. Candidate fix: effective timeout =
 max(--timeout, per-op floor) so one global knob scales everything. Small; pairs
 naturally with the Phase 6 help-text polish in TASKS.md.
+
+Also here (remainder of old F1): **`scripts start|stop --wait-update` is broken** —
+it waits up to 15 s (HARDCODED, not a knob) for an `object.update` notification,
+but none ever arrives for set_running operations (observed live on Alchemy), then
+re-fetches inventory which shows STALE state — so the flag currently reports
+misleading output like "now: running (no update observed)" after a stop. Open
+question: does the viewer send `object.update` for running-state changes at all?
+If not, either fix the client to poll inventory with retries instead of waiting
+for a notification that never comes, or add a bug-report item (ARCHITECTURE.md
+gotcha #4 says confirmation arrives as object.update).
 
 ### F3. Verify "Explore in IDE" multi-select behaviour (disputed claim, 2026-11-19)
 An earlier draft bug-report item (#8, NOT posted) claimed that clicking Explore in
@@ -144,13 +154,106 @@ Still worth verifying with tapple present (low priority):
    `getFirstRootObject()`, so it should publish the whole root linkset; confirm
    that's what happens and whether that's desirable UX.
 
-### F1. `slsync scripts start|stop|reset` never exercised live (debt since Phase 3)
-**RESOLVED 2026-11-19**: Start/stop WORK — script output starts/stops via tail.
-BUT: `--wait-update` does NOT work (no `object.update` notification arrives).
-Inventory re-fetch also unreliable. Verified with a simple llOwnerSay timer script.
-See NOTES.md for details.
+### F8. `scripts reset` never exercised live (remainder of old F1)
+Old F1 is split: start/stop verified 2026-11-19 (NOTES.md "F1 test result");
+`--wait-update` moved to F5; this is what's left. `slsync scripts reset <item>`
+dispatches object.script.reset — never run live.
+Safe test on a scratch object: timer script with llOwnerSay in state_entry → reset
+while running → tail should show the state_entry message again (re-initialised).
+Edge case: reset on a STOPPED script — does it start it, no-op, or error?
 
-### F2. `slsync commands run` never exercised live (debt since Phase 4)
-**RESOLVED 2026-11-19**: Tested `viewer.camera.focus` — works fine, camera zooms
-to the target object. Teleport and other disruptive commands NOT tested.
+### F9. `commands run viewer.script.recompile_all` untested (split of old F2)
+Params: --object-id (required), --target luau|lsl2|mono|auto (required).
+Recompiles ALL scripts in the object — changes VM/running state; scratch object only.
+The `commands run` machinery itself (param parsing, capability gate) is verified
+via viewer.camera.focus 2026-11-19 (NOTES.md); untested here is the command's effect.
+Test: scratch object with one LSL + one Luau script → recompile_all --target auto →
+objects show (vm fields intact) + tail (scripts still run). Open question: behaviour
+when one of the scripts has a compile error (interacts with F4 findings).
+
+### F10. `commands run viewer.script.reset_all` untested (split of old F2)
+Params: --object-id (required). Resets ALL scripts in the object — affects running
+state; scratch object only, tapple present.
+Test: two running timer scripts (llOwnerSay in state_entry) → reset_all → tail shows
+both re-initialise. Compare with per-item `scripts reset` (F8) — effects should match.
+
+### F11. `commands run viewer.object.save_back_to_contents` untested (split of old F2)
+Params: --object-id (required). Writes the in-world object back to its SOURCE
+inventory contents — potentially destructive for non-scratch objects; never run.
+Negative test first (safe): all scratch objects report "save-back available: no" →
+call it on one, expect a clean error. Positive test needs an object with save-back
+enabled — tapple decides whether to create/expose one.
+
+### F12. `commands run viewer.teleport` untested (split of old F2)
+Params: --object-id (required). Moves tapple's avatar — disruptive; only with her
+present and in-world attention. Start same-region (scratch prim) to keep it quick;
+cross-region later if wanted. Verify arrival in-world + no viewer error.
+
+### F13. Raw Python traceback when the viewer is not reachable (observed 2026-11-19, twice)
+Any command against a down viewer (e.g. `slsync status`, `slsync commands list`)
+prints a full ConnectionRefusedError traceback instead of a friendly error. Root
+cause: `_execute` in cli.py only catches ViewerError; the OSError from
+websockets.connect escapes. Fix: catch connection failures and print e.g.
+"error: cannot connect to ws://127.0.0.1:9020 — is the viewer running with the
+editor server enabled?" (exit 1). Observed twice 2026-11-19: start of session
+(status on both ports) and tapple re-checking `commands list`. Small fix in
+_execute and/or ViewerSession.connect.
+
+### F14. Evaluate whether the `slsync commands` group is necessary (raised 2026-11-19)
+tapple: it looks like an unnecessary extra layer — the viewer's command.execute
+commands could perhaps just live in a different help section of top-level `slsync`
+("things unrelated to moving inventory") instead of a subcommand group with its own
+list/run verbs. Evaluate: discoverability via --help, agent ergonomics (Phase 5
+decision: CLI only, good --help matters), and whether the generic
+`run --param k=v` interface earns its keep vs typed shortcuts (old Phase 4 optional
+item). Decide BEFORE Phase 6 help-text polish so we don't polish a layer we remove.
+
+Related (tapple): `commands list` shouldn't need a network connection at all — it
+could be a static help page. Counter-consideration: today it calls the live
+command.list method, which reports what THIS viewer build supports (command set is
+feature-gated, ARCHITECTURE.md gotcha #8); a static page risks drift. Candidate
+resolution: static list from the spec's documented command set (ties into F15) for
+discovery, with the live check available if/when it still earns its place.
+
+### F15. Review protocol spec for features not exposed in slsync (raised 2026-11-19)
+Unknown: does external-editor-json-rpc.md define more commands than the 5 that
+command.list returned at runtime (viewer.script.recompile_all, viewer.script.reset_all,
+viewer.object.save_back_to_contents, viewer.camera.focus, viewer.teleport)? Walk the
+spec method by method and diff against slsync's surface (system.*, object.*,
+script.*, command.*); record gaps as tasks or explicit non-goals in ARCHITECTURE.md.
+Note the spec may lag the implementation in BOTH directions: system.getStats is NOT
+in the public spec (undocumented; see NOTES B4).
+
+### F16. Revisit `_is_sim_rename` in cli.py (tapple review, 2026-11-19)
+Three objections to the uncommitted helper used by put's create-race workaround:
+1. Name is unclear.
+2. It incompletely encapsulates SL's duplicate-rename logic: the sim increments
+   the trailing number until it finds a free slot ("name", "name 1", "name 2"...);
+   the helper only RECOGNISES "name <digits>", doesn't model/predict assignment —
+   and its name/docstring overstate that it does.
+3. Is it needed at all? Alternatives: trust the viewer's create response, or
+   verify with a plain inventory diff.
+Context for whoever picks this up (why it exists): trusting the response is
+empirically unsafe on current viewers — both failure modes were observed live:
+the "Item was not found in updated inventory" race AND F7's response naming a
+pre-existing unrelated item. A plain ID diff is also unsafe: when the viewer's
+inventory snapshot is stale/empty, pre-existing items appear as "new" and the old
+code overwrote one (observed live). The name pattern is currently the only
+remaining discriminator for "which new-looking item did WE just create". Possible
+resolutions: rename to something like `_plausibly_created_item` with a docstring
+saying it's a recognizer, not a model of sim naming; or rework the workaround to
+search by name instead of diffing ids (caveat: if the snapshot was stale, an
+existing "name N" and our genuinely new "name M" can BOTH be candidates — the ID
+diff is what excludes the former when it's fresh); or drop the workaround entirely
+if F7 gets fixed viewer-side.
+
+### F17. MCP-cached inventory snapshots (tapple, 2026-11-19 — she wants to think on this first)
+New angle for the parked MCP question (NOTES.md "Design notes: tail for agents" +
+Decision #2 CLI-only; ARCHITECTURE.md descope note): snapshotting and diffing prim
+inventory would work better inside an MCP server, because the snapshot wouldn't
+need to be recomputed on demand per CLI invocation — it could stay cached and kept
+fresh by the persistent connection. This session's F7/F16 stale-snapshot problems
+are exactly the pain a cached, continuously-updated snapshot would remove. Good idea
+in theory; needs followup and review before any design work. BLOCKED ON: tapple
+thinking it through.
 

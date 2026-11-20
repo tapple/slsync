@@ -28,3 +28,24 @@ def test_cli_help(args, expected):
     result = CliRunner().invoke(cli, args)
     assert result.exit_code == expected, result.output
     assert "slsync" in result.output
+
+
+@pytest.mark.parametrize(
+    ("candidate", "wanted", "expected"),
+    [
+        ("foo", "foo", True),
+        ("FOO", "foo", True),  # case-insensitive
+        ("foo 1", "foo", True),  # sim duplicate rename
+        ("foo 42", "foo", True),
+        ("foo 1x", "foo", False),
+        ("foobar", "foo", False),  # longer prefix, not a rename
+        ("foo_1", "foo", False),
+        ("bar", "foo", False),
+        ("", "foo", False),
+        ("foo", "", False),
+    ],
+)
+def test_is_sim_rename(candidate, wanted, expected):
+    from slsync.cli import _is_sim_rename
+
+    assert _is_sim_rename(candidate, wanted) is expected

@@ -678,15 +678,33 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
             }
             if item_type == "script":
                 cparams["vm"] = vm or default_vm or "lsl2"
+            # Snapshot before creating: validates the create response and
+            # feeds the diff-based workaround below.
+            before_ids = {it["item_id"] for it in prim["inventory"]}
+            created: dict | None = None
+            create_err: ViewerRPCError | None = None
             try:
-                created = await s.call("object.item.create", cparams, timeout=SAVE_TIMEOUT)
-            except ViewerRPCError as create_err:
-                # Workaround for a viewer quirk (seen systematically on this
-                # build): the item is created in-world but the viewer's
-                # post-creation check races the inventory sync and fails.
-                # Detect the new item by diffing inventories, with retries.
-                before_ids = {it["item_id"] for it in prim["inventory"]}
-                created = None
+                created = await s.call("object.item.create", cparams, timeout=save_timeout)
+                # The viewer's post-creation inventory check is unreliable in
+                # BOTH directions (see NOTES.md): besides the systematic
+                # "Item was not found in updated inventory" race, it has been
+                # observed to return a PRE-EXISTING unrelated item as the
+                # result (official 26.5.0, 2026-11-19). An id present in our
+                # pre-create snapshot cannot be the new item — fall through to
+                # the diff-based search rather than overwrite that item.
+                if created.get("item_id") in before_ids:
+                    click.echo(
+                        "warning: create response referenced a pre-existing item; "
+                        "re-identifying via inventory diff",
+                        err=True,
+                    )
+                    created = None
+            except ViewerRPCError as e:
+                # The documented race: the item is created in-world but the
+                # viewer's post-creation check fails. Detect the new item by
+                # diffing inventories, with retries.
+                create_err = e
+            if created is None:
                 for _ in range(20):  # up to ~20 s
                     after = await O.fetch_published(s, timeout=obj["timeout"])
                     try:
@@ -696,15 +714,29 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
                     new_items = [
                         it for it in prim_now["inventory"] if it["item_id"] not in before_ids
                     ]
-                    if new_items:
+                    # Only accept a candidate whose name is inv_name or a sim
+                    # duplicate-rename of it. If the viewer's inventory snapshot
+                    # was stale/empty, before_ids misses existing items and the
+                    # diff would report them as "new" — accepting the first such
+                    # item would overwrite an UNRELATED item with the uploaded
+                    # content (observed live 2026-11-19). Keep polling instead.
+                    cands = [
+                        it for it in new_items if _is_sim_rename(it.get("name", ""), inv_name)
+                    ]
+                    if cands:
                         created = {
-                            "item_id": new_items[0]["item_id"],
-                            "name": new_items[0].get("name", inv_name),
+                            "item_id": cands[0]["item_id"],
+                            "name": cands[0].get("name", inv_name),
                         }
                         break
                     await anyio.sleep(1.0)
                 if created is None:
-                    raise create_err
+                    if create_err is not None:
+                        raise create_err
+                    raise click.ClickException(
+                        f"item {inv_name!r} was created but could not be identified in "
+                        f"the prim's inventory; check for a new item there and retry"
+                    )
             item_id = created["item_id"]
             actual_name = created.get("name", inv_name)
             # Upload content after creation for both types. (item.create's
@@ -719,7 +751,8 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
                 sparams["vm"] = vm
             if running is not None:
                 sparams["running"] = running
-            r = await _save_with_verify(s, prim["id"], item_id, sparams, content, obj)
+            r = await _save_with_verify(s, prim["id"], item_id, sparams, content, obj,
+                                        save_timeout=save_timeout)
             return {"action": "created+updated", "item_id": item_id, "name": actual_name, **r}
 
     p = _execute(obj, run)
@@ -743,7 +776,28 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
             raise SystemExit(1)
 
 
-async def _save_with_verify(s: ViewerSession, prim_id: str, item_id: str, params: dict, content: str, obj: Obj) -> dict:
+def _is_sim_rename(candidate: str, wanted: str) -> bool:
+    """True if candidate is wanted or a sim duplicate-rename of it.
+
+    The simulator renames items with duplicate names by appending a counter
+    (e.g. 'ground-script' -> 'ground-script 1'). Used to identify the item
+    just created when diffing inventories, so an unrelated item is never
+    mistaken for the new one.
+    """
+    c = candidate.strip()
+    w = wanted.strip()
+    if not w:
+        return False
+    if c.lower() == w.lower():
+        return True
+    prefix = w + " "
+    if c.lower().startswith(prefix.lower()):
+        return c[len(prefix):].isdigit()
+    return False
+
+
+async def _save_with_verify(s: ViewerSession, prim_id: str, item_id: str, params: dict, content: str,
+                            obj: Obj, save_timeout: float = SAVE_TIMEOUT) -> dict:
     """object.content.save with a read-back fallback.
 
     On some viewer paths (seen with worn attachments) the upload completes but
@@ -751,7 +805,7 @@ async def _save_with_verify(s: ViewerSession, prim_id: str, item_id: str, params
     the content is saved. Verify by reading the item back before failing.
     """
     try:
-        return await s.call("object.content.save", params=params, timeout=SAVE_TIMEOUT)
+        return await s.call("object.content.save", params=params, timeout=save_timeout)
     except ViewerRPCError as e:
         if e.code != -32001:  # only timeouts are worth verifying
             raise

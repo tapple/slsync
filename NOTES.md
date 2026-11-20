@@ -80,6 +80,10 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   viewers); pre-create snapshot guard rejects create responses referencing a
   pre-existing id. Live integration tests added (tests/test_live.py, `live`
   marker, skip-when-unavailable — not a hard gate per tapple).
+- `commands run` machinery verified 2026-11-19 via viewer.camera.focus (official
+  9021): dispatch ok, camera moved to the target prim (confirmed by tapple).
+  Individual commands recompile_all / reset_all / save_back_to_contents / teleport
+  remain untested — FOLLOWUPS F9–F12.
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued
