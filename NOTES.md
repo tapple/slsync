@@ -84,6 +84,17 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   9021): dispatch ok, camera moved to the target prim (confirmed by tapple).
   Individual commands recompile_all / reset_all / save_back_to_contents / teleport
   remain untested — FOLLOWUPS F9–F12.
+- Session-end gap list (2026-11-19 evening, from chat review):
+  1. Official 26.5.0's log contains NO per-call RPC entries — only connection /
+     handshake / buildAndSendPublish / launchVSCode lines (176 ScriptEditorWS lines
+     for a busy session). Corrects our earlier "logs every editor-server event"
+     note; server-side confirmation of timed-out responses is NOT possible from the
+     log on this build. (Investigate whether the viewer has a more verbose logging
+     option here — probably not.)
+  2. `scripts list` semantics unverified: reported "no subscribed scripts" while a
+     script on the explored object was running. When does a script get "subscribed"
+     (live_sync?), and should an empty list say so more clearly? (Live-sync is low
+     priority — notes only.)
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued

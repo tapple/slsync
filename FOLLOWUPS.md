@@ -30,6 +30,10 @@ pytest -m live`).
 - Official 9021: bad Luau → inline diagnostics; **bad LSL → the save call gets NO
   response** (client timeout at 75 s default / `--save-timeout`); slsync read-back
   note "viewer did not confirm compilation", exit 0. Good scripts fine.
+- Official 9021 nuance: its Luau diagnostics can arrive with an EMPTY message body
+  ("ERROR line 4:              (to close '(' at line 3), got 'end'" — expected-text
+  blank/garbled) while Alchemy rendered the full "Expected ')' ..." text. Include
+  in the item #4 rewrite.
 - `script.compiled` notification: never observed on either viewer — including a
   success case, but NOT yet proven with raw wire capture (step 2 below).
 
@@ -256,4 +260,10 @@ fresh by the persistent connection. This session's F7/F16 stale-snapshot problem
 are exactly the pain a cached, continuously-updated snapshot would remove. Good idea
 in theory; needs followup and review before any design work. BLOCKED ON: tapple
 thinking it through.
+
+### F18. `put -` stdin mode advertised but broken (noted 2026-11-19)
+`slsync put`'s help/docstring claims "'-' reads stdin", but the click argument is
+click.Path(exists=True), which rejects "-" with "Path '-' does not exist" (hit
+live). Either fix (special-case "-" before path validation) or remove the claim
+from help/docstring. Small.
 
