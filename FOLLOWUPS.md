@@ -56,7 +56,10 @@ pytest -m live`).
 ### F7. item.create returns a pre-existing item id — investigate (suspected viewer bug, official 26.5.0)
 Context: separate from F4 (different RPC method); observed correlation with a
 preceding HUNG bad-LSL save is an open question, not established causation.
-Environment/cleanup: see F4. All code changes UNCOMMITTED; announce live probes.
+Environment/cleanup: see F4. Announce live probes. NOTE: the client-side guards
+(name filter + pre-create snapshot check) are being consolidated into the
+find_new_item primitive per F5 step 4 — they stay (the viewer bug is real and
+unfixed); only their home moves.
 
 **Evidence so far — exact sequence** (pytest run, SLSYNC_LIVE_URL=ws://127.0.0.1:9021,
 official SL viewer Release 26.5.0.42122621216, scratch object "Object" [260d253b-6f65-
@@ -125,24 +128,91 @@ or an installed entrypoint via `uv tool install`); keep repo scripts
 Tapple: "I need to stop just vibecoding this tool" — pair with a proper test/
 docs pass rather than ad-hoc live poking.
 
-### F5. Timeouts & wait semantics are inconsistent (noted 2026-11-19)
-Three knobs cover disjoint scopes: `--connect-timeout` (connect+handshake),
-`--timeout` (all other calls), `put --save-timeout` (create+save inside put). Gaps:
-`slsync get` and the read-back in `_save_with_verify` use a hardcoded GET_TIMEOUT=45 s
-ignoring `--timeout`; standalone `items create` times its item.create with `--timeout`
-while put's create path uses `--save-timeout`. Candidate fix: effective timeout =
-max(--timeout, per-op floor) so one global knob scales everything. Small; pairs
-naturally with the Phase 6 help-text polish in TASKS.md.
+### F5. Cleanup plan: timeouts, waits & reconciliation (revised 2026-11-19 from code review)
+Umbrella refactor task. Motivation: vibecoding left timeouts as 4+ scattered
+constants/knobs and "reconciliation" as ad-hoc per-command loops; the
+viewer-unreliability workarounds sit inline in `put` (~100 lines). Target shape:
+tapple's three-stage invocation model, refined by code review — (1) connect,
+(2) primary calls, (3) reconciliation via small named primitives with explicit
+bounds. session.py is the clean part; cli.py is the mess.
 
-Also here (remainder of old F1): **`scripts start|stop --wait-update` is broken** —
-it waits up to 15 s (HARDCODED, not a knob) for an `object.update` notification,
-but none ever arrives for set_running operations (observed live on Alchemy), then
-re-fetches inventory which shows STALE state — so the flag currently reports
-misleading output like "now: running (no update observed)" after a stop. Open
-question: does the viewer send `object.update` for running-state changes at all?
-If not, either fix the client to poll inventory with retries instead of waiting
-for a notification that never comes, or add a bug-report item (ARCHITECTURE.md
-gotcha #4 says confirmation arrives as object.update).
+Stage-model corrections (review of tapple's 2026-11-19 draft):
+- Stage 1: TCP+WS upgrade currently sit OUTSIDE --connect-timeout (websockets lib
+  default governs them); the protocol handshake uses TWO separate windows. → make ONE
+  window cover connect→handshake→session.ok.
+- Stage 2: correct as-is — id-correlated responses are sound; harden _dispatch to
+  REQUIRE result|error on response frames (a malformed id-only frame would currently
+  resolve a pending call with None).
+- Stage 3: NO collective bound exists today; every loop is hand-rolled (put's
+  create-race 20×(fetch+1 s), scripts --wait-update hardcoded 15 s, explore --wait,
+  _save_with_verify read-back GET_TIMEOUT=45). → named primitives, bounds in one place.
+
+Steps (each independently shippable; unit-test with FakeViewer where noted):
+1. session.py: single connect window; require result|error in response dispatch;
+   wrap OS/websockets errors as ViewerConnectionError(ViewerError).
+2. cli._execute: catch ViewerConnectionError → friendly "cannot connect to <url> —
+   is the viewer running with the editor server enabled?" exit 1. Closes F13.
+3. Timeout unification: drop GET_TIMEOUT/SAVE_TIMEOUT constants and the
+   --save-timeout knob (added+committed this session; deliberate reversal). One global
+   --timeout as the unit for a single viewer op; per-op floors via max(--timeout, floor):
+   save/create 75 s, get/read-back 45 s — floors documented in help text.
+   Reconciliation primitives take an explicit budget (default 2× call timeout).
+   Update tests/test_live.py SAVE_TIMEOUT_ARG → --timeout. Rewrite ARCHITECTURE.md
+   "Invocation lifecycle" section to match reality afterwards.
+4. Extract the reconciliation core as `object_inventory.py` (name per tapple): a
+   sync engine keeping a synced copy of ONE prim's inventory — metadata only
+   (items: id/name/type/vm/running); content bytes stay direct object.content.get
+   calls (verify_saved_content remains a separate small helper).
+
+   Core model (expanded 2026-11-19, tapple + agent):
+   - Async event loop (anyio task group) with cache states FRESH | STALE | POLLING.
+     "Clean" (FRESH) means QUIESCENCE: a poll completed with no dirty mark arriving
+     during it. That is NOT the same as "the poll a waiter was waiting for came
+     back": waiters are evaluated against the latest cache after EVERY poll and may
+     be satisfied while the cache is still STALE (more changes in flight) — fine,
+     provided every waiter carries its own deadline regardless; the viewer may never
+     converge (stale views observed 20+ s).
+   - Dirty-marking sources (asymmetric rule — this is what prevents the
+     notify→poll→dirty→poll loop):
+     a) our own mutating calls (create/save/delete/modify/set_running/rename) →
+        mark STALE immediately (optimistic invalidation);
+     b) broadcast notifications for the tracked object (object.update/publish/
+        unpublish) → mark STALE. POLL RESPONSES NEVER MARK DIRTY — only broadcasts
+        do — so each real change produces finitely many re-triggers and the loop
+        converges. Coalesce: dirty is a plain bool consumed at poll completion; a
+        mark during a poll buys exactly one more pass;
+     c) connection loss/reconnect (MCP mode) → STALE.
+   - Granularity: per-PRIM (whole object), not per-item — the invalidation unit must
+     match the fetch unit, and the only read primitive known is whole-prim
+     (object.list returns full trees; no named-item-collection fetch observed).
+     Per-item tracking stays useful at the WAITER layer (predicate "item X has
+     running==false"). REVISIT if F15's spec diff finds a finer-grained read method.
+     Delta-applying object.update payloads instead of re-fetching is a future
+     optimization, not the base design (viewer state is untrusted).
+   - Driver-agnostic: CLI mode = engine lives for ONE command, polls until its
+     predicate is satisfied or the reconciliation budget (default 2× call timeout)
+     expires; MCP mode (F17) = one long-lived engine per tracked prim, broadcasts
+     keep it warm, polls on dirty with debounce. Same library, different lifetime —
+     so the engine must not assume persistence.
+   - Rough public surface: ObjectInventory(session, object_ref); .snapshot() (may be
+     STALE; caller decides); .wait_until(predicate, budget) → bool — the primitive
+     that put's create-race workaround, scripts --wait-update, and objects explore
+     all reduce to; explicit .invalidate() hooks for mutating calls.
+   - _is_sim_rename is absorbed here as the predicate helper "which new-looking item
+     did WE just create", renamed per F16 (e.g. _plausibly_created_item).
+   Unit-test with FakeViewer: create-race error, wrong-id response (F7), stale
+   snapshot, duplicate broadcasts, mark-during-poll coalescing. put() becomes a thin
+   composition of named steps over this engine.
+5. Rebuild scripts start|stop --wait-update on the primitives: POLL inventory
+   (bounded) instead of waiting for an object.update that never arrives for
+   set_running (observed live; old F1 remainder) — fixes the misleading "now:
+   running (no update observed)" output; keep the notification as an early-exit fast
+   path. objects explore likewise.
+6. Live-test expansion per F8–F12 as those land.
+
+Supersedes/absorbs: old F5 knob gaps, F13 (step 2), F16 (step 4), the --wait-update
+half of old F1 (step 5). F7's client-side guards move into find_new_item (step 4);
+F7's investigation steps are unchanged.
 
 ### F3. Verify "Explore in IDE" multi-select behaviour (disputed claim, 2026-11-19)
 An earlier draft bug-report item (#8, NOT posted) claimed that clicking Explore in
@@ -250,6 +320,8 @@ search by name instead of diffing ids (caveat: if the snapshot was stale, an
 existing "name N" and our genuinely new "name M" can BOTH be candidates — the ID
 diff is what excludes the former when it's fresh); or drop the workaround entirely
 if F7 gets fixed viewer-side.
+RESOLUTION ADOPTED: F5 step 4 (extract into find_new_item + rename + FakeViewer unit
+tests). This item closes when that lands.
 
 ### F17. MCP-cached inventory snapshots (tapple, 2026-11-19 — she wants to think on this first)
 New angle for the parked MCP question (NOTES.md "Design notes: tail for agents" +
@@ -260,6 +332,17 @@ fresh by the persistent connection. This session's F7/F16 stale-snapshot problem
 are exactly the pain a cached, continuously-updated snapshot would remove. Good idea
 in theory; needs followup and review before any design work. BLOCKED ON: tapple
 thinking it through.
+
+Protocol fact reinforcing this (2026-11-19): the protocol has NO stream-level
+sequence numbers — only per-call JSON-RPC ids (ours are ints; the viewer's own
+requests carry string ids like "rpc_1083", a server-side counter), and
+NOTIFICATIONS CARRY NO ID AT ALL (session.ok, object.update, runtime.debug,
+script.compiled are bare method+params). Consequences: no way to correlate a
+broadcast update with the call that caused it (root of the --wait-update problem;
+F5 step 5 polls instead), and no "events since last seq" primitive exists. If a
+future protocol revision exposed sequence numbers on notifications, that would make
+the MCP cached-snapshot/buffer design dramatically stronger — likely the real reason
+it feels right.
 
 ### F18. `put -` stdin mode advertised but broken (noted 2026-11-19)
 `slsync put`'s help/docstring claims "'-' reads stdin", but the click argument is

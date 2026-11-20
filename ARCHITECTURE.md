@@ -48,6 +48,35 @@ Design rules:
 - Viewer is "dispatched, not applied" for many mutating calls (see gotchas) —
   a `--wait-update` flag waits for the confirming `object.update`.
 
+## Invocation lifecycle and timeouts
+
+Every invocation is a fresh connection (Design rules) running three stages.
+("Stage" here means an invocation stage; the project's implementation phases
+live in TASKS.md.)
+
+1. **Connect.** TCP + WebSocket upgrade first (bounded by the websockets
+   library's own default, not ours — loopback, no TLS). Then the protocol
+   handshake under `--connect-timeout` (default 15 s): wait for the viewer's
+   `session.handshake` request, answer it (reading its challenge file), wait for
+   the `session.ok` notification. These are two separate timeout windows — up to
+   2× `--connect-timeout` worst case.
+2. **Primary calls.** One or more JSON-RPC calls, each bounded individually by
+   `--timeout` (default 60 s) — except inside `put`, where `object.item.create`
+   and `object.content.save` use `--save-timeout` (default 75 s; the viewer needs
+   up to ~60 s for upload+compile). Responses are correlated by JSON-RPC id, so
+   interleaved notifications can never satisfy a pending call.
+3. **Reconciliation** (only when step 2 was inconclusive). Each follow-up is
+   bounded individually; there is NO collective bound, so total wall time can
+   exceed any single knob:
+   - content.save timeout → one `object.content.get` read-back (hardcoded
+     GET_TIMEOUT = 45 s)
+   - create race ("Item was not found in updated inventory") or a create response
+     naming a pre-existing item → up to 20 × (`object.list` at `--timeout` + 1 s)
+   - `scripts start|stop --wait-update` → up to 15 s for an `object.update`
+   - `objects explore` → up to `--wait` (default 15 s) for the publish
+
+Known inconsistency in these bounds: see FOLLOWUPS.md F5.
+
 ## Gotchas from the spec (do not trip on these)
 
 1. An object must be **published** before any of its items can be addressed by
