@@ -1,0 +1,44 @@
+==============================================
+Compile-error reproduction — 2026-11-21T12:33:16Z
+Target: ws://127.0.0.1:9020   Object (by name): Object   Settle delay: 5s
+==============================================
+
+--- Good LSL script (create) ---
+created+updated: item f6888be4-07ab-b285-4f8c-65b3d1e84ae2
+  compiled: yes
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (compiled: yes)
+
+--- Bad LSL syntax — missing closing brace ---
+created+updated: item 176dbdf8-8b17-bff4-bb93-72fad5664a59
+  compiled: no
+  ERROR line 3: Syntax error
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (inline diagnostics in save response)
+
+--- Bad LSL semantic — undefined variable ---
+created+updated: item f1fce7a5-50d3-2ffe-1389-897ae2333489
+  compiled: no
+  ERROR line 3: Name not defined within scope
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (inline diagnostics in save response)
+
+--- Good Luau script (create) ---
+created+updated: item 01f30463-31a2-ce18-e55e-71d7132ee401
+  compiled: yes
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (compiled: yes)
+
+--- Bad Luau syntax — missing closing paren ---
+created+updated: item 9840df08-b4b5-a23e-2e7a-5b70124c3940
+  compiled: no
+  ERROR line 3: Expected ')' (to close '(' at line 2), got 'end'
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (inline diagnostics in save response)
+
+==============================================
+Done. Spec: diagnostics come back inline in the
+object.content.save response for all failures.
+DEVIATION lines are report-worthy behaviour.
+Items named repro-123316-327557-* were deleted on exit.
+==============================================

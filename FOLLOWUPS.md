@@ -6,7 +6,249 @@ remove it from here.
 
 ## Open
 
+### F23. CLI surface redesign: flat unix-style commands, eliminate objects/items/scripts groups (tapple 2026-11-21)
+Following F22, tapple's spec (names normalized to the current CLI):
+- COLLAPSE `objects list` + `items list` into one command named `ls`;
+  `objects show` is also redundant against `ls` (absorbed).
+- `scripts list` should just be a FILTER against this simplified `ls`.
+- `ls` shows script running state, object perms, and item perms, formatted
+  like the unix command.
+- RENAME `items delete` → `rm`.
+- COMBINE `items rename` + `objects rename` → `mv`.
+- COMBINE `items create` INTO `put`.
+- COMBINE `objects perms` + `items perms` → `setperms`.
+- RENAME `objects explore` → `publish`.
+- RENAME `objects stop` → `unpublish`.
+- COMBINE `objects describe` + `items describe` → `describe`.
+- MOVE `start`, `stop`, `reset` from the `scripts` group to top level.
+- Group commands logically in --help.
+- Net effect (tapple): eliminates the `objects`, `items`, and `scripts`
+  subcommand groups entirely.
+
+Resulting surface (top-level, flat):
+| new | replaces | notes |
+|---|---|---|
+| ls [REF...] | objects list + items list + objects show | unix-style columns: name, type/vm, running (scripts), object+item perms; F22's glob/REF args; --json tree |
+| rm REF... | items delete | F22 patterns; F20 error semantics |
+| mv SRC DST | items rename + objects rename | rename in place (check spec for cross-prim moves before promising them) |
+| put FILE [REF] | put + items create | create+upload already exists; absorbs --type/--text (stdin; F18 prerequisite) |
+| get REF [FILE] | get | unchanged |
+| setperms REF ... | objects perms + items perms | REF resolves to prim or item |
+| describe REF ... | objects describe + items describe | object.modify / object.item.modify |
+| publish REF | objects explore | |
+| unpublish REF | objects stop | |
+| start REF | scripts start | --wait-update rebuilds per F5 step 5 |
+| stop REF | scripts stop | |
+| reset REF | scripts reset | |
+| ls --scripts (flag) | scripts list | inventory-based view; see design point 2 |
+| status, probe, tail | unchanged | commands group per F14 |
+
+Proposed --help grouping (settle at implementation): Inspect (ls, status,
+probe) / Transfer (get, put) / Edit (mv, setperms, describe) / Lifecycle
+(publish, unpublish, start, stop, reset) / Stream (tail) / Viewer (commands).
+
+Design points:
+1. `ls` output / perm display (DECIDED, tapple 2026-11-21): the viewer has
+   precedent. Five permission categories (BOGEN), each with four bitmask
+   flags VMCT — meanings per
+   https://wiki.secondlife.com/wiki/LlGetInventoryPermMask. Display format:
+   per category, e.g. `B:VMCT N:V_C_` (blank = flag not set). View tiers:
+   default shows only B and N; -vv shows all five categories. If fetching
+   perms and script running state takes MULTIPLE websocket calls (beyond
+   the one object.list), they are left out of the default view and included
+   with -v — but first check the object.list payload: if it already carries
+   them, they cost nothing and belong in the default view (the -v gating
+   exists only for real call cost). The --json tree shape changes for all
+   three absorbed commands (objects list, items list, objects show) — agents
+   depend on it.
+2. `scripts list` data source: today it calls script.list (EDITOR SESSION
+   subscription state), which is a DIFFERENT source than object.list
+   inventory. Per Decisions #1 (no live-sync) slsync never subscribes, so
+   script.list is always empty for us — decide: drop the call entirely and
+   make `ls --scripts` an inventory filter (proposed), or keep it as a flag.
+3. `put` absorbing `items create`: type from explicit --type vs source-file
+   extension (current put infers from extension); empty notecard = empty
+   stdin — FIX F18 (broken `put -` stdin) first; items create's --text flag
+   disappears (stdin IS the text).
+4. `mv` semantics: rename in place only unless the spec supports cross-prim
+   item moves (check external-editor-json-rpc.md object.item.modify params);
+   DST forms (bare new name vs prim/name).
+5. Old-name aliases: DECIDED — CLEAN BREAK, no deprecation aliases (tapple
+   2026-11-21; the repo is under a week old — no compatibility debt). The F6
+   canonical-invocation doc + Phase 5 skill doc carry the new surface.
+6. Sequencing (DECIDED, tapple 2026-11-21): (1) the renames/collapses
+   first, with EACH RENAME ITS OWN COMMIT (tapple reviews each step); (2)
+   the F5 sync engine (F5 step 4, object_inventory.py) second; (3)
+   globbing/filtering (the F22 mechanism in ls/rm) third.
+
+Cross-references:
+- F4 (bug-report evidence) is BLOCKED on this item + F22: the repro script
+  must be simplified (new surface, one-command glob cleanup) before it is
+  shared with the report.
+- F22 (glob args for delete/list) is absorbed here — its mechanism lands in
+  ls/rm per design point 6's ordering (third, after the F5 engine); F22
+  closes when this does.
+- F14 (evaluate the `commands` group) must be decided BEFORE the --help
+  grouping is written — its outcome is an input to the layout.
+- F18 (put stdin broken) is a prerequisite for fully absorbing items create.
+- F5 (timeout/reconciliation refactor) — sequencing per design point 6.
+- F6 (canonical agent invocation story) + Phase 5 skill doc must document
+  the new surface; this redesign makes both more urgent.
+
+DOC UPDATES ON COMPLETION (large — per AGENTS.md doc-invalidation rule):
+TASKS.md Phase 2 lines (objects list/explore/stop/show/rename|describe|perms,
+items list/create/delete/rename|describe|perms, get/put), Phase 3 lines
+(scripts list/start/stop/reset → new names; tail unchanged), Phase 4 (per
+F14), Phase 6 help-text scope; ARCHITECTURE.md Layout (groups → flat surface);
+AGENTS.md quick-orientation + error-message text (objects.py AddressError
+sugg"start one with slsync objects explore" → "slsync publish");
+NOTES.md Testing-notes command references (items delete cleanup lines, F4
+"objects show" mentions); tools/repro_compile_errors.sh +
+tools/probe_create_wire.py + tests/test_live.py updated to the new surface in
+the SAME change; HANDOFF-explore-in-ide.md verification section (objects list
+→ ls); README (Phase 6) written directly against the new surface — no
+double-churn.
+
+### F22. Batch operations via glob patterns: items delete / items list / others (tapple 2026-11-21)
+Motivation: cleanup loops. With pattern-capable delete, the repro script's
+cleanup_items becomes ONE command (`slsync items delete
+"$OBJECT_NAME/$PREFIX-*" -y`) instead of a per-name loop with its own
+retry bookkeeping. ABSORBED BY F23 (2026-11-21): the glob mechanism lands in
+the new `ls`/`rm` — ordered THIRD, after the renames and the F5 sync engine
+(F23 design point 6); this item closes when F23 does. The design points
+below carry over to F23's ls/rm.
+Scope (tapple): `items delete` and `items list` certainly; "maybe others"
+— evaluate at implementation time: items rename|describe|perms
+(object.item.modify), get (multi-fetch), put (multi-upload)?
+Design points to settle:
+- Matching happens IN slsync against the remote object tree, NOT via shell
+  expansion: callers pass a QUOTED pattern (e.g. 'Object/repro-*'); --help
+  must warn that unquoted patterns risk the shell expanding them against
+  local files. fnmatch-style match on the item name — decide case
+  sensitivity deliberately (our _is_sim_rename compares case-insensitively;
+  check what the viewer itself does for exact-name lookups first).
+- Argument shape: repeatable ITEM_REFs, any of which may be a pattern
+  (`items delete REF [REF...]`).
+- `items list`: today takes a prim and shows its whole inventory — add an
+  optional pattern/REF filter so it shows only matching items.
+- Per-item result reporting (one line per item: deleted/kept/failed +
+  reason); one item's failure must not abort the rest (report all);
+  exit non-zero if any failed.
+- Zero matches: OPEN for tapple — error (rm-style) or warn + exit 0
+  (cleanup scripts expect idempotent no-ops)? Note F20's ruling ("item not
+  found" = error exit, all ops incl. delete) covers identified-but-missing
+  items, not zero pattern matches — that is a separate decision.
+- -y confirmation: a single prompt listing all resolved targets.
+Coordination: the glob resolution belongs next to F20's shared not-found
+validation (same "deal with inventory names/uuids" surface); the repro
+script cleanup simplification lands with it (keep the get-query-verified
+retry around the single pattern-delete for the stale-view problem).
+DOC UPDATES ON COMPLETION: TASKS.md Phase 2 `items delete` line (and
+`items list` line if it changes), objects.py address-forms docstring,
+--help text (quote-your-pattern warning).
+
+### F21. Top-level `--trace` option: dump raw sent/received frames to stderr (tapple 2026-11-21)
+A global option (alongside --json/--timeout) that dumps every raw WebSocket
+frame — sent AND received: handshake, calls, responses, notifications — to
+STDERR. Plumb already exists: session.py's on_raw_frame hook (notified
+"out" before send, "in" before parse); `tail --raw` is the only current
+consumer. Work: the global flag + wiring the hook into _execute for ALL
+commands, and extracting the format into a shared formatter.
+Format (DECIDED, tapple 2026-11-21): IDENTICAL to `tail --raw`, via the
+shared formatter — one line per frame: `[In] <raw frame text>` / `[Out]
+<raw frame text>`. Markers [In]/[Out] — tapple: less ambiguous than arrows.
+This normalizes tail --raw's current lowercase [in]/[out] to [In]/[Out]
+(user-visible change, mention in the same commit). Keep the frame RAW (it
+is valid JSON on the wire; do not re-serialize) so captures are greppable.
+No extra fields (no timestamp) — extend both consumers together if one is
+ever wanted.
+--trace vs tail --raw: near-duplicate BY DESIGN (tapple: fine — nobody
+reasonably combines them, and they write to different streams: --trace on
+stderr for any command, tail --raw on stdout for tail). tail --raw keeps
+its own flag; both call the same formatter.
+Naming: DECIDED `--trace`. (A top-level --raw was rejected — it would
+collide with tail's existing --raw flag.)
+Help text / docs placement (decided 2026-11-21): `--help` carries only the
+FACT — e.g. "Dump every raw WebSocket frame to stderr ([In]/[Out] format,
+same as tail --raw)." Do NOT put workflow advice in --help (no "redirect
+stderr to a file and grep"): redirecting is generic shell practice, and the
+reason it matters (pi's exec result concatenates stdout+stderr unlabeled
+and truncates at 2000 lines / 50 KB) is harness-specific and will change —
+slsync docs must not couple to one harness's behavior. The redirect pattern
+belongs here as the intended agent usage (`slsync --trace <cmd>
+2>/tmp/trace.log`, then grep the file) and, when it lands, in the Phase 5
+agent skill doc ("non-obvious workflows").
+Synergy: once landed, F7 step 2's wire-capture need (duplicate frames /
+id-carrying non-response frames) can use `slsync --trace ... 2>file`
+instead of the bespoke tools/probe_create_wire.py — or the probe can reuse
+the same hook.
+DOC UPDATES ON COMPLETION: ARCHITECTURE.md (session raw-frame hook + global
+options), --help text (Phase 6 scope); TASKS.md if a Phase 1 "--json global
+option" analogue line is warranted; README when it lands.
+
+### F20. Item delete: be lenient about what counts as "item missing"; shared not-found validation for inventory references (tapple 2026-11-21)
+Today's findings make the current hard-error behaviour of reference-lookup
+failures actively harmful: the viewer reports "item not in inventory" in at
+least TWO wordings — "Item was not found in updated inventory" (create
+post-check race, 2026-11-19) and `-32602 "Item not found in prim inventory"`
+(2026-11-21, both viewers, seen on delete/create/save lookups) — plus a
+stale inventory view can make a lookup fail even though the item exists (the
+2026-11-21 repro cleanup incident: five strays left because name-lookup
+deletes failed against the stale view).
+Request (tapple): `items delete` (and every other inventory operation) should
+be lenient in INTERPRETATION — recognize all the not-found wordings and
+states as one first-class "item not found" outcome — but NOT in exit status:
+"item not found" is an ERROR (non-zero exit) in ALL operations, INCLUDING
+delete (tapple correction 2026-11-21, retracting my idempotent-exit-0
+proposal). The win is a consistent, friendly, predictable "item not found"
+error — same shape no matter which wording the viewer used, and whether the
+failure was client-side reference resolution or a viewer-side lookup —
+instead of ad-hoc per-wording generic RPC errors. The repro script's
+cleanup must then expect the error exit and rely on its get-query
+verification (which it already has; align the exit-code handling).
+Scope (tapple): this should probably be a SHARED validation function used by
+ALL CLI commands that deal with inventory names/uuids — delete, put's
+create-race handling, items rename|describe|perms (object.item.modify), get —
+one place that classifies not-found vs stale-view vs other errors. The
+2026-11-21 NOTES finding on the -32602 wording is the input data.
+Coordination: F5 step 4 (object_inventory.py) is the natural home for
+inventory access + classification — either land F20 as a small standalone
+helper first (cli.py) and move it into the engine when F5 lands, or fold it
+into F5 step 4. Either way, don't duplicate the wordings in N places.
+Also fixes a class of false alarms for agents: a delete of an already-gone
+item (e.g. after a viewer-side cleanup) currently looks like a failure.
+DOC UPDATES ON COMPLETION: TASKS.md Phase 2 `items delete` line (currently
+"confirm prompt unless -y; LIVE-VERIFIED" — needs the lenient not-found
+semantics noted); ARCHITECTURE.md reconciliation bullet (create-race
+wording) — but that whole section is marked PRE-F5 and gets rewritten by F5
+steps 3/4, so if F20 lands standalone, keep the edit minimal and let F5's
+rewrite carry the full update.
+
+### F19. Repro script should self-manage the connected-client precondition (tapple 2026-11-21; NOT yet implemented)
+The viewer's "Explore in IDE" button only publishes directly when a websocket
+client is connected (B1), so anyone running tools/repro_compile_errors.sh must
+first start a background `slsync tail`. Tapple: "super annoying, and will
+probably also confuse whoever runs the reproduction script." Her spec: the
+script should (1) start the tail listener in the background, (2) tell the user
+to publish the scratch object, (3) wait until the object actually appears in
+object.list (get-query polling — NOT notifications, per F5's reliability
+finding), (4) run the test cases only after that. On exit, kill the background
+tail in the cleanup trap (mind pkill self-matching — bracketed pattern, see
+NOTES Testing notes). Keep the current precondition (exit 2 + message) as the
+manual-mode fallback. Alternative worth weighing against her spec: take the
+object UUID and publish via the protocol (`objects explore`), skipping the
+button entirely — but note B7 (26.5.1 button desync) makes the button route
+flaky for the very audience this script serves. DO NOT implement until tapple
+says go — the 2026-11-21 F4 run deliberately used manually-started tails.
+
 ### F4. Compile-error reporting — finish evidence gathering for bug-report item #4 (2026-11-19)
+**Status (2026-11-21): evidence complete + item #4 rewrite drafted (NOTES.md)
+— now BLOCKED on F23/F22.** Tapple wants the repro script simplified
+(unix-style surface, glob-based one-command cleanup) before it is shared as
+the report's evidence. The report body as drafted is essentially correct; the
+only unfinished part is posting the evidence. Do NOT share or attach
+tools/repro_compile_errors.sh in its current form — it gets rewritten when
+F23's renames + F22's globbing land.
 Context: tapple is updating the POSTED bug report; the master copy is on the web
 (https://feedback.secondlife.com/slua-alpha/p/bugs-with-the-lua-plugin-websocket,
 fetchable via curl — do not trust local copies). Item #4 ("Compile errors return
@@ -45,23 +287,36 @@ pytest -m live`).
   The object-explorer path gets compile feedback inline in the content.save
   response (which is where the real bugs are: see below).
 
+**2026-11-21 results (both viewers 26.5.1 — evidence complete):**
+- Alchemy 26.5.1.68594: all 5 cases CONFORM (inline diagnostics, full text).
+- Official 26.5.1.44155260796: bad LSL (syntax + semantic) → NO response,
+  verified past the spec's 60 s budget (75 s save timeout, still nothing, no
+  -32001; read-back confirms content stored). Bad Luau → NON-DETERMINISTIC:
+  one inline round (message corrupted: empty expected-token field carries a
+  NUL byte on the wire) then 4/4 hangs. Transcripts:
+  evidence/repro-compile-20261121-902{0,1}-*.log.
+- The repro script needed two bug-fixes before its transcripts were
+  trustworthy: the sim TRUNCATES long item names (69→63 chars observed —
+  exact-name lookups broke), and the post-check ran too eagerly against the
+  documented lagging inventory view (now retries ~6 s). Verdict logic
+  unchanged; get-query-only per F5 reliability finding.
+- F7 trigger check (bonus): two consecutive hung bad-LSL saves on 9021 did
+  NOT corrupt the immediately following create responses (good-luau and
+  bad-luau creates returned correct ids/names) — the 2026-11-19
+  hung-save→wrong-create-response correlation did NOT reproduce on 26.5.1.
+
 **Steps:**
-1. Run `tools/repro_compile_errors.sh` against each available viewer (default
-   9020; pass ws://127.0.0.1:9021 for official). It is written per tapple's spec
-   (one viewer, object by NAME "Object", inline scripts, unique names,
-   --save-timeout 30, CONFORMS/DEVIATION verdicts vs spec, self-cleanup) but has
-   NOT been run live yet — verify it first.
+1. ~~Run `tools/repro_compile_errors.sh` against each available viewer~~ —
+   DONE 2026-11-21 on both (see results above).
 2. ~~Prove script.compiled absence with raw capture~~ — MOOT after full spec read
    (see Established): its absence is by design for non-subscribed clients.
 3. ~~ASK TAPPLE (exit-code semantics)~~ — RESOLVED 2026-11-21 (NOTES
    Decisions #8): keep exit 0 when the change was made; the unconfirmed-compile
    note moves to stderr (implemented: `warning:` prefix).
-4. Rewrite bug-report item #4 around the REAL deviation: on official 26.5.0 a
-   content.save of bad LSL returns NO response at all — spec guarantees inline
-   compiled/diagnostics, or -32001 within 60 s ("Scripts allow 60 seconds for
-   upload and compilation ... Exceeding either fails the call with -32001").
-   Include the A/B table (Alchemy responds inline; official hangs) plus the
-   empty-Luau-diagnostic-message nuance. Drop any script.compiled claim.
+4. ~~Rewrite bug-report item #4 around the REAL deviation~~ — DRAFTED 2026-11-21
+   in NOTES.md ("Item #4 rewrite" section, paste-ready): no-response-past-60s
+   for bad LSL, non-deterministic + NUL-corrupted diagnostics for bad Luau,
+   A/B table, no script.compiled claim, supersession note for the old draft.
    DO NOT post; tapple reviews and posts.
 
 ### F7. item.create returns a pre-existing item id — investigate (suspected viewer bug, official 26.5.0)

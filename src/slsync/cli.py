@@ -764,7 +764,9 @@ def put(obj: Obj, file: str, prim_ref: str, name: str | None, vm: str | None, ru
     if p.get("name") and p.get("name") != inv_name:
         click.echo(f"  (simulator renamed it to {p['name']!r})")
     if p.get("note"):
-        click.echo(f"  {p['note']}")
+        # Warnings (e.g. unconfirmed compile) go to stderr; exit code still
+        # reflects whether the requested change was made.
+        click.echo(f"warning: {p['note']}", err=True)
     elif "compiled" in p:
         click.echo(f"  compiled: {'yes' if p['compiled'] else 'no'}")
         for d in p.get("diagnostics") or []:

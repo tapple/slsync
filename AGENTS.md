@@ -19,6 +19,7 @@ pasting into web forms mangled.
 | `NOTES.md` | Findings, decisions, test notes, bug-report master copies | **new findings** (viewer anomalies → "Viewer bug report notes") |
 | `FOLLOWUPS.md` | Known issues / verification debts outside the phased tasks | new follow-ups; resolved items move to NOTES.md |
 | `ARCHITECTURE.md` | How it works, design rules, protocol gotchas | architecture changes, new spec gotchas |
+| `HANDOFF-explore-in-ide.md` | Self-contained brief for a viewer-side fix of the "Explore in IDE" silent-failure bug (B1/B7 cluster) | new evidence / fix status as the fix progresses |
 
 Doc-invalidation rule: any task/follow-up that will change the CLI surface,
 module layout, or a documented design rule MUST carry an explicit note in its

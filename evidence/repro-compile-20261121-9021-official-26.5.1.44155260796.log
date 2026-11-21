@@ -1,0 +1,43 @@
+==============================================
+Compile-error reproduction — 2026-11-21T12:25:24Z
+Target: ws://127.0.0.1:9021   Object (by name): Object   Settle delay: 5s
+==============================================
+
+--- Good LSL script (create) ---
+created+updated: item 4508c8d5-7277-8af5-9aee-a6f3ee820770
+  compiled: yes
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (compiled: yes)
+
+--- Bad LSL syntax — missing closing brace ---
+created+updated: item 80e2481f-8bc2-9b5c-f013-3fe83445f359
+warning: viewer did not confirm compilation; verified by read-back
+>>> post-check (get query): item visible in object.list
+>>> DEVIATION (save call got NO response; slsync fell back to read-back)
+
+--- Bad LSL semantic — undefined variable ---
+created+updated: item 8d0e5930-24a9-db59-9790-672fdeeae3f5
+warning: viewer did not confirm compilation; verified by read-back
+>>> post-check (get query): item visible in object.list
+>>> DEVIATION (save call got NO response; slsync fell back to read-back)
+
+--- Good Luau script (create) ---
+created+updated: item 0f98f02a-3752-edfd-98bf-1a6e180c0287
+  compiled: yes
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (compiled: yes)
+
+--- Bad Luau syntax — missing closing paren ---
+tools/repro_compile_errors.sh: line 79: warning: command substitution: ignored null byte in input
+created+updated: item 386d6edd-2c11-c3ff-d00c-cab7610bba6f
+  compiled: no
+  ERROR line 3:  (to close '(' at line 2), got 'end'
+>>> post-check (get query): item visible in object.list
+>>> CONFORMS (inline diagnostics in save response)
+
+==============================================
+Done. Spec: diagnostics come back inline in the
+object.content.save response for all failures.
+DEVIATION lines are report-worthy behaviour.
+Items named repro-122524-325466-* were deleted on exit.
+==============================================

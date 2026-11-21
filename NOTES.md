@@ -149,6 +149,28 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   system.getStats`); all other methods appear per-connection. So
   `global_method_count: 1` may be correct-as-designed — phrase any report as a
   semantics question, not a violation.
+- (2026-11-21, both viewers 26.5.1; transcripts in evidence/repro-compile-20261121-*)
+  Final compile-error A/B for the bug report: Alchemy 26.5.1.68594 CONFORMS on
+  all 5 cases (inline diagnostics, full message text). Official
+  26.5.1.44155260796: bad LSL (syntax AND semantic) → NO response, verified
+  past the spec's 60 s budget (75 s save timeout, still nothing, no -32001;
+  content verified stored via read-back); bad Luau → NON-DETERMINISTIC: inline
+  diagnostics once (message corrupted — empty expected-token field carries a
+  NUL byte on the wire, bash "ignored null byte in input"), then 4/4 hangs.
+  Rewritten bug-report item #4 is in the "Viewer bug report notes" section.
+- (2026-11-21, Alchemy 26.5.1.68594, 9020) `put` of a new script failed with
+  `-32602 "Item not found in prim inventory"` — NEW wording; the documented
+  create race was "Item was not found in updated inventory". The item WAS
+  created (verified in object.list ~5 s later) but put aborted, leaving it
+  with default template content. Ambiguous which call produced the error:
+  (a) create's post-creation check with reworded message — slsync's
+  diff-based workaround catches ANY create error, so it would have polled ~20
+  s and missed a stale view that recovered afterwards; or (b) content.save
+  looking the item up in a stale inventory view (save errors other than
+  -32001 are re-raised immediately). If it recurs, time the command to
+  disambiguate. F5's reconciliation work should absorb this wording. Also
+  observed same run: the sim TRUNCATES long item names (a 69-char name came
+  back 63 chars; put's rename detection surfaced it).
 
 ## Viewer bug report notes (master copy until posted; started 2026-11-18)
 
@@ -173,6 +195,26 @@ Shared/by-design context: B1 resolution (silent no-op UX), B3/B4 (ask semantics)
 Official items: port-in-use crash, ping `timestamp` int32 truncation (B5), ping
 `server_time` INT32_MIN (B3), silent compile errors, ItemRef.language wrong for
 Luau. The "Stop Exploring" label is NOT a bug on official — do not include it there.
+
+### Item #4 rewrite (2026-11-21, official 26.5.1 — ready for tapple to review + post)
+
+Replace the posted item #4 ("Compile errors return no result on the
+websocket ... returns success: true with no compiled field and no
+diagnostics, and no script.compiled notification arrives") with:
+
+**4. object.content.save gives no result for failed LSL compiles (no response, no error); failed Luau compiles are non-deterministic and can carry corrupted diagnostics**
+
+The protocol spec (external-editor-json-rpc.md) says compile diagnostics come back INLINE in the object.content.save response (compiled: false + diagnostics), and that scripts are allowed 60 seconds for upload and compilation, with exceeding that failing the call with -32001. A failed compile therefore has exactly two spec-compliant outcomes: inline diagnostics, or -32001 within 60 s.
+
+Official viewer, LSL scripts that fail to compile: the save call gets NO response at all — not inline diagnostics, not -32001, nothing. Verified on Release 26.5.1.44155260796 with a 75 s client timeout (still no response, i.e. beyond the spec's 60 s budget with no result and no error; also reproduced on 26.5.0.42122621216, 2026-11-19, past 75 s). The content IS stored: an object.content.get read-back after the timeout returns exactly what was uploaded, so the compile-wait is simply left dangling. Both syntax errors and semantic errors (undefined variable) hang; good scripts respond normally (compiled: true).
+
+Official viewer, Luau scripts that fail to compile: non-deterministic. In one round (2026-11-21 ~12:25 UTC) the same script that then hung repeatedly returned inline diagnostics — but the diagnostic message was corrupted: the expected-token field was empty and carried a NUL byte on the wire (rendered as "ERROR line 3:  (to close '(' at line 2), got 'end'" — note the double space; capturing the client output in bash warns "ignored null byte in input"). Minutes later the same script on the same viewer hung 4/4 with no response.
+
+A/B, 2026-11-21, same scripts, same region (Equestrian): Alchemy Test 26.5.1.68594 — good LSL: compiled true; bad LSL (syntax): compiled false + "ERROR line 3: Syntax error"; bad LSL (semantic): compiled false + "ERROR line 3: Name not defined within scope"; good Luau: compiled true; bad Luau: compiled false + "ERROR line 3: Expected ')' (to close '(' at line 2), got 'end'". Official Release 26.5.1.44155260796 — good LSL: compiled true; bad LSL (syntax): NO response (75 s budget exceeded, no -32001); bad LSL (semantic): NO response; good Luau: compiled true; bad Luau: NO response, or the corrupted inline diagnostics described above. (Alchemy is shown as the spec-conformant reference behaviour; the deviation is the official viewer's.)
+
+Note: the script.compiled broadcast is routed only to subscribed editor connections per spec and is not part of this item; the object-explorer path gets compile feedback inline in the content.save response, which is where the deviation is. The original draft of this item (success: true with no compiled field, missing script.compiled notification) was superseded by this testing.
+
+Repro: tools/repro_compile_errors.sh in the linked repo — five cases (good/bad LSL x2, good/bad Luau), unique item names, per-case CONFORMS/DEVIATION verdicts vs the spec, self-cleanup of its test items; needs one explored scratch object.
 
 ### B1. "Explore in IDE" → objects never appear in `object.list` (2026-11-19)
 
@@ -306,6 +348,18 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
   `mPublishButton->setLabel(getString(ide ? "ide_label" : "studio_label"))`
   (official has no such setLabel call); that apparently suppresses the
   selected-label swap and/or the active-colour styling.
+
+### B7. Publish button toggle state desynced after silent launch-editor failures — "Stop Exploring" ×2 before "Explore in IDE" becomes available (official 26.5.1, 2026-11-21)
+- Official Release 26.5.1.44155260796 (9021, PippinGao). Full timeline (viewer log + slsync tail):
+  - 10:24:45–10:28:17Z: SEVEN "Explore in IDE" clicks with no websocket client connected; each took the launch-editor path and silently failed (log: "Could not locate 'code' on PATH" + "launchVSCode : Failed to launch VS Code"); nothing published. Clicks spanned Pippin's new prim ("Object" [a8c5a206-3638-b143-b497-074364305415]) and Tapple's prim (cross-ownership; they hold edit perms on each other's objects).
+  - 11:26:12Z: slsync tail connects (client present → button takes the direct-publish path).
+  - 12:29:49Z publish → 12:29:51Z unpublish (user) → 12:29:52Z publish (tail broadcasts; the log shows the two buildAndSendPublish entries but NO unpublish line — minor logging gap, note in report).
+- User experience (tapple): with the client connected, the button showed "Stop Exploring" for an object that had never been published (objects list was empty). She had to click "Stop Exploring" twice before the "Explore in IDE" option became available; the final click then published. Net: 3 clicks to publish one object, with a spurious publish/unpublish pair, after 7 silent-failure clicks.
+- Mechanism (to confirm): a click that takes the launch-editor path flips/leaves the button's toggle state WITHOUT reconciling to the actual publish state (the launch fails, so no publish happens and nothing refreshes the state). Later client-connected clicks then toggle the real server-side state from the desynced label: "Stop Exploring" click #1 actually PUBLISHED, #2 unpublished and the label finally read "Explore in IDE". Alternative (indistinguishable from the log, which records only server-side actions): the label failed to swap after the 12:29:49Z publish (B6-family, though B6 was Alchemy-specific). Ask tapple which label she saw at each step.
+- On 2026-11-19 the button worked on the first press on official 26.5.0 with a client connected (B1 live verification) — suspected 26.5.1 regression, or a state path not previously exercised.
+- Alchemy 26.5.1.68594, same session: three analogous pre-client failed clicks (10:24:16Z, 10:28:34Z, 10:28:37Z) but a clean single-click publish at 12:29:43Z — either flip parity happened to land right or state got reconciled; ask tapple what label 9020 showed.
+- Code pointers (both viewers): llpanelcontents.cpp onClickPublish / getState (`mPublishButton->setToggleState(server && server->isObjectPublished(...))`); floater_tools.xml `name="button publish"`, is_toggle=true, label_selected="Stop Exploring".
+- Bug-report consequence: item #4's repro step (press Explore in IDE with a client connected) can misbehave on 26.5.1 — the posted repro steps should use protocol-based exploration (object.request over the editor websocket) or note this quirk.
 
 ## Decisions (tapple)
 
