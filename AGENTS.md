@@ -33,13 +33,14 @@ Protocol spec: `external-editor-json-rpc.md`. Reference implementation:
 
 - `cd ~/cabbage/secondlife/slsync && uv run slsync status` — sanity check.
 - Viewers: **Alchemy on 9020**, **official SL viewer on 9021**
-  (`--url ws://127.0.0.1:9021`, or `SLSYNC_URL`). Both avatars in Equestrian (luau).
+  (`--url ws://127.0.0.1:9021`, or `SLSYNC_URL`). Avatar regions vary per
+  session — check the viewer log before assuming an object is addressable
+  (NOTES Decisions #7).
 - A persistent `slsync tail` per viewer keeps the "Explore in IDE" button working —
-  start/stop commands and current viewer state are in NOTES.md ("Testing notes").
-- Viewer logs (log every editor-server event): official
+  start/stop commands are in NOTES.md ("Testing notes").
+- Viewer logs (connection/handshake/publish lines; official 26.5.0+ logs no
+  per-call RPC entries): official
   `~/.secondlife/logs/SecondLife.log`, Alchemy `~/.local/state/alchemynext/Alchemy.log`.
   Sources: official `../viewer`, Alchemy built locally from `../NewAlchemy`.
-- Scratch items on tapple's exposed test objects are permitted within NOTES.md
-  "Decisions" #4; delete test artifacts afterwards.
-- Commit + push after meaningful changes — the repo is published (tapple shares it
-  with Rye, the Alchemy author).
+  Test objects do NOT persist between sessions; never assume an object UUID from an
+  old note is still in-world.

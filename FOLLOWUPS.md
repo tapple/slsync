@@ -14,13 +14,17 @@ no result") needs rewriting with today's A/B findings. Code from this session is
 committed incrementally (tapple reviewed each step; see git log). Announce every
 live probe.
 
-**Environment:** official viewer 26.5.0 on ws://127.0.0.1:9021 with scratch
-object "Object" [260d253b-6f65-f110-ac0f-9e70699fad60] explored (leftover test
-items inside — clean up when done: `slsync --url ws://127.0.0.1:9021 items
-delete Object/<name> -y`, inventory view is flaky, retry + verify via objects
-show). Alchemy's scratch df7f06ef was DELETED in-world ~19:00Z — tapple
-re-exposes one on 9020 or F4 runs against 9021 only. The committed `put
---save-timeout` flag is used by the repro; live tests in
+**Environment (updated 2026-11-21):** viewers now 26.5.1 — official Release
+26.5.1.44155260796 on ws://127.0.0.1:9021, Alchemy Test 26.5.1.68594 on
+ws://127.0.0.1:9020 (both updated since the 2026-11-19 findings; Alchemy fixed
+several old issues — see NOTES B2). Test objects do NOT persist between
+sessions (NOTES Decisions #7): before each F4 run, tapple creates + exposes a
+scratch object in the target avatar's CURRENT region (the repro targets it by
+name, default "Object"; SLSYNC_LIVE_OBJECT overrides), and nothing is
+pre-published after a viewer restart — verify with `objects list` first.
+Clean up test items when done: `slsync items delete Object/<name> -y`
+(inventory view is flaky, retry + verify via objects show). The committed
+`put --save-timeout` flag is used by the repro; live tests in
 tests/test_live.py use it too (`SLSYNC_LIVE_URL=ws://127.0.0.1:9021 uv run
 pytest -m live`).
 
@@ -49,9 +53,9 @@ pytest -m live`).
    NOT been run live yet — verify it first.
 2. ~~Prove script.compiled absence with raw capture~~ — MOOT after full spec read
    (see Established): its absence is by design for non-subscribed clients.
-3. **ASK TAPPLE (exit-code semantics):** put exits 0 when content is saved but
-   compile state unknown (read-back path). Keep 0 vs exit non-zero so agents treat
-   unconfirmed compiles as failures?
+3. ~~ASK TAPPLE (exit-code semantics)~~ — RESOLVED 2026-11-21 (NOTES
+   Decisions #8): keep exit 0 when the change was made; the unconfirmed-compile
+   note moves to stderr (implemented: `warning:` prefix).
 4. Rewrite bug-report item #4 around the REAL deviation: on official 26.5.0 a
    content.save of bad LSL returns NO response at all — spec guarantees inline
    compiled/diagnostics, or -32001 within 60 s ("Scripts allow 60 seconds for

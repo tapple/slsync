@@ -255,6 +255,9 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
 - A/B 2026-11-19, both avatars in Equestrian (luau region): official reports
   `agent_name: "PippinGao"` + UUID; Alchemy still empty → luau-region hypothesis
   ruled out; this is an Alchemy-specific bug.
+- **FIXED in Alchemy Test 26.5.1.68594 (observed 2026-11-21):** handshake on
+  9020 now reports the real avatar (`agent_name` + `agent_id`) — part of the
+  batch Rye fixed in the 26.5.1 update.
 
 ### B3. `system.ping` response `server_time` = -2147483648 (INT32_MIN) (2026-11-19)
 - Every ping: `"server_time": -2147483648` — exact int32 min, looks like an
@@ -333,6 +336,23 @@ UUIDs including non-owned prims (2×2 matrix, ~07:45Z — ownership irrelevant).
    works" section so the MIT copyright notice is carried with every copy.
    Per-file header added to `src/slsync/session.py` (the closest translation of
    their client); other files left unheadered for now.
+7. **Test objects do not persist between sessions** (tapple 2026-11-21): she
+   does not keep test objects in-world between sessions, and will not start.
+   Agents must NOT assume any object UUID survives a session — or a viewer
+   restart: after a restart, `objects list` is empty until tapple creates +
+   exposes scratch objects for that session. Avatar regions vary per session
+   too; check where each avatar actually logged in (viewer log) before assuming
+   an object is addressable — object.request only resolves objects in the
+   avatar's loaded region (2026-11-21: both `Object not found` errors traced to
+   this, not a viewer bug).
+8. **Exit-code semantics: `put` exits 0 when the requested change was made**
+   (tapple 2026-11-21): an unconfirmed compile (save call timed out, content
+   verified by read-back) still exits 0 — the transfer succeeded; the
+   `warning: viewer did not confirm compilation; verified by read-back` line
+   goes to STDERR (never stdout), so stdout-only consumers see confirmed
+   results. The unconfirmed-compile viewer behaviour is reported separately
+   (bug report item #4); the CLI must not conflate "saved, unconfirmed" with
+   "failed".
 
 ## Open questions for tapple
 
@@ -388,12 +408,15 @@ Options for concern 1:
 
 ## Testing notes
 
-- Live viewers (2026-11-19 A/B setup): Alchemy Test v26.4.0.68225 on **9020**,
-  official SL viewer Release v26.5.0.42122621216 on **9021**
-  (`slsync --url ws://127.0.0.1:9021` or `SLSYNC_URL`). Both avatars in Equestrian
-  (luau region). **Record every anomaly observed during probing** (bug notes above).
-- Current viewer state (2026-11-19 ~14:50Z): 9021 has b8af6575 + 689a7470
-  published; 9020 has e5f103bb + 7a01ff67 (TH AO) published.
+- Live viewers: Alchemy Test on **9020**, official SL viewer on **9021**
+  (`slsync --url ws://127.0.0.1:9021` or `SLSYNC_URL`). Builds 2026-11-21:
+  Alchemy Test 26.5.1.68594 / official Release 26.5.1.44155260796 (both
+  updated from the 26.4.0/26.5.0 pair the posted bug report was written
+  against). Avatar regions vary per session — see Decisions #7. **Record
+  every anomaly observed during probing** (bug notes above).
+- No assumed in-world state: nothing is pre-published after a viewer restart
+  and no test objects persist between sessions (Decisions #7). Establish state
+  fresh each session with `objects list` before any object work.
 - PippinGao is tapple's ALT; Pippin has edit permission on tapple's objects and
   vice versa (so cross-ownership Explore-in-IDE works). Without edit perms the
   button is greyed/unresponsive — matches source gating (`new_button_enabled`
@@ -404,18 +427,18 @@ Options for concern 1:
   bracketed pattern like `tail --js[o]nl`); restart:
   `setsid nohup uv run slsync --url ws://127.0.0.1:90NN tail --kinds
   debug,error,publish,unpublish > /tmp/tail-90NN-human.txt 2>/dev/null &`.
-- Viewer logs (great for debugging — they log every editor-server event, incl.
-  `buildAndSendPublish`, `launchVSCode` failures): official =
+- Viewer logs (great for debugging — connection/handshake/`buildAndSendPublish`/
+  `launchVSCode`-failure lines; NOTE: official 26.5.0+ logs NO per-call RPC
+  entries — see session-end gap list): official =
   `~/.secondlife/logs/SecondLife.log`; Alchemy =
   `~/.local/state/alchemynext/Alchemy.log`. Viewer sources: official checkout at
-  `../viewer` (v26.5.0, matches installed build), Alchemy built locally from
-  `../NewAlchemy` (build number changes on rebuild).
-- Test prim UUIDs (Equestrian, 2026-11-19): PippinGao's b8af6575-09a9-27e9-
-  3584-738de2a8336e, 689a7470-5030-b7f6-324b-36a90c4a436b; tapple's
-  e5f103bb-667f-c8c1-e4d9-0783dce9fcb8, 7a01ff67-47c2-d32f-24a4-ebe2819f8000
-  (TH AO). All three non-AO prims are named "Object" (the SL default name —
-  not a slsync fallback). The AO carries a "Show Object uuid/key" script that
-  llOwnerSays its own key.
+  `../viewer` (v26.5.0 — verify it matches the installed build before source
+  archaeology), Alchemy built locally from `../NewAlchemy` (build number
+  changes on rebuild).
+- Test prim UUIDs: intentionally not recorded here (Decisions #7) — test
+  objects do not persist between sessions. Scratch objects created for a
+  session are addressed by NAME (default "Object" — the SL default name, not
+  a slsync fallback) and are gone the moment tapple deletes them.
 - Challenge file lands in the viewer's tmpdir as `sl_script_challenge_<uuid>.tmp`.
 - Announce before every live probe (tapple may have things turned off in-world).
 - Scratch test scripts used 2026-11-19 for protocol probes (all deleted after):
