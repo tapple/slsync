@@ -33,9 +33,7 @@ Protocol spec: `external-editor-json-rpc.md`. Reference implementation:
 
 - `cd ~/cabbage/secondlife/slsync && uv run slsync status` — sanity check.
 - Viewers: **Alchemy on 9020**, **official SL viewer on 9021**
-  (`--url ws://127.0.0.1:9021`, or `SLSYNC_URL`). Avatar regions vary per
-  session — check the viewer log before assuming an object is addressable
-  (NOTES Decisions #7).
+  (`--url ws://127.0.0.1:9021`, or `SLSYNC_URL`).
 - A persistent `slsync tail` per viewer keeps the "Explore in IDE" button working —
   start/stop commands are in NOTES.md ("Testing notes").
 - Viewer logs (connection/handshake/publish lines; official 26.5.0+ logs no
