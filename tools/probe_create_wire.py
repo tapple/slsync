@@ -13,10 +13,12 @@ replays the failing sequence from the 2026-11-19 pytest run:
      against the pre-create snapshot and the inventory diff
 
 Also scans the capture for duplicate inbound frames and inbound messages
-carrying an id that are not responses (a notification with an id would be
-misdispatched as a response by slsync — see session.py _dispatch).
+carrying an id without result/error: session.py _dispatch would resolve a pending
+call with result=None on such a frame, while a notification carrying an id instead
+lands in the method+id branch and is treated as a viewer→client request (see
+session.py _dispatch).
 
-Usage: uv run --project <repo> python tests/probe_create_wire.py [URL]
+Usage: uv run --project <repo> python tools/probe_create_wire.py [URL]
        (default ws://127.0.0.1:9021)
 """
 from __future__ import annotations

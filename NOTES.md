@@ -56,6 +56,10 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   notification arrives for these operations, so we can't confirm the state change.
   Inventory re-fetch after a delay also doesn't reliably reflect the new state (stale
   view). For verification, rely on observing actual script output via tail.
+  Spec context (full read 2026-11-19): set_running/reset responses are documented as
+  "success means dispatched, not applied" with confirmation arriving only "if it
+  arrives" as object.update — the missing update is a spec-sanctioned hedge, not
+  clearly a bug; clients must poll (F5 step 5).
 - (2026-11-19 evening, compile-error diagnosis; full handoff in FOLLOWUPS.md F4)
   Viewer A/B on `object.content.save` of a syntactically invalid script:
   - Alchemy 26.4.0.68225 (9020): inline `compiled: no` + diagnostics for BOTH
@@ -64,7 +68,7 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
     only; bad LSL → the save call gets NO response at all (client timeout; slsync
     falls back to read-back: "viewer did not confirm compilation", exit 0).
   - `script.compiled` broadcast notification never observed on either viewer,
-    success or failure (raw-wire proof still pending — F4 step 3).
+    success or failure (raw-wire proof still pending — F4 step 2).
 - **NEW BUG (suspected, official 26.5.0): `object.item.create` returned a
   pre-existing unrelated item as its result.** During a live test run the create
   response carried item_id/name of an existing item (test-official-good) while the
@@ -74,7 +78,8 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
   pending (F7). Related: the documented "Item was not found in updated
   inventory" race and this wrong-id response are likely two faces of the same
   unreliable post-creation inventory check.
-- slsync hardening (uncommitted, F5): `put --save-timeout`; create-race workaround
+- slsync hardening (committed 2026-11-19; may be reworked by F5): `put
+  --save-timeout`; create-race workaround
   name-filters candidates (`_is_sim_rename`) — the old code overwrote an UNRELATED
   item when the viewer's inventory snapshot was stale/empty (observed live, both
   viewers); pre-create snapshot guard rejects create responses referencing a
@@ -91,10 +96,25 @@ viewer anomalies go to "Viewer bug report notes"). Dates are UTC.
      note; server-side confirmation of timed-out responses is NOT possible from the
      log on this build. (Investigate whether the viewer has a more verbose logging
      option here — probably not.)
-  2. `scripts list` semantics unverified: reported "no subscribed scripts" while a
-     script on the explored object was running. When does a script get "subscribed"
-     (live_sync?), and should an empty list say so more clearly? (Live-sync is low
-     priority — notes only.)
+  2. RESOLVED (F15, 2026-11-19): `scripts list` → "no subscribed scripts" was
+     CORRECT — subscription happens via explicit script.subscribe calls (spec),
+     which slsync never makes. Live-sync is low priority; subscribe/unsubscribe
+     recorded as documented non-goal in the spec-vs-surface note below.
+- Spec-vs-surface diff (archived from FOLLOWUPS F15, 2026-11-19, full spec read):
+  every spec method is present in slsync EXCEPT — script.subscribe (call) +
+  script.unsubscribe (call AND viewer→extension notification): live-sync
+  subscription; documented non-goal per Decisions #1/#2. And the language.* family
+  (language.syntax.id / .syntax / .syntax.cache / .syntax.get calls + .syntax.change
+  notification): editor syntax-highlighting support (keyword defs; Luau type/docs
+  files for luau-lsp); likewise a non-goal, listed for completeness.
+  viewer.* commands: spec lists exactly the 5 the runtime returns (recompile_all,
+  reset_all, save_back_to_contents, camera.focus, teleport) — no hidden sixth.
+  Reverse direction: system.getStats is in slsync but NOT in the public spec (B4).
+  Side notes: session.py advertises live_sync:true though we never subscribe
+  (harmless; revisit with F17); object.list is the ONLY inventory read primitive
+  (no named-item-collection fetch) — closes F5 step 4's revisit condition;
+  script.compiled is spec-defined but routed only to subscribed connections, so its
+  absence for slsync is by design (see F4 + ARCHITECTURE gotcha #3).
 - (tapple, 2026-11-18) The worn-attachment inventory divergence is probably NOT
   caused by the ~646-item count per se: the SL viewer has historically been bad at
   displaying prim inventories with hundreds of items (old UDP-era bug: queued

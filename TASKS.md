@@ -61,9 +61,11 @@ Collaborator: tapple (she/her). Announce before every live probe.
 - [x] `slsync scripts list` — `script.list`: editor-session state (subscribed
       scripts), NOT an object inventory. LIVE-SMOKE-TESTED.
 - [x] `slsync scripts start|stop <item>` — `object.script.set_running`
-      (`--wait-update` to confirm via `object.update`). Implemented; not yet exercised
-      live (would toggle a real script — do it with tapple present). See FOLLOWUPS.md F1.
-- [x] `slsync scripts reset <item>` — `object.script.reset`. Same caveat.
+      (`--wait-update` to confirm via `object.update`). LIVE-VERIFIED 2026-11-19
+      (NOTES.md "F1 test result"); note: `--wait-update` is unreliable — no
+      object.update arrives for set_running; being rebuilt per FOLLOWUPS F5.
+- [x] `slsync scripts reset <item>` — `object.script.reset`. Implemented; not yet
+      exercised live — see FOLLOWUPS.md F8.
 - [x] `slsync tail [--object REF] [--kinds ...] [--jsonl] [--raw] [--all]` — stream
       events (broadcast to ALL connections; no subscription needed). Display modes:
       human (viewer-console style, TTY colours), `--jsonl` (agent mode), `--raw`

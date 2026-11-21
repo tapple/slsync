@@ -20,6 +20,12 @@ pasting into web forms mangled.
 | `FOLLOWUPS.md` | Known issues / verification debts outside the phased tasks | new follow-ups; resolved items move to NOTES.md |
 | `ARCHITECTURE.md` | How it works, design rules, protocol gotchas | architecture changes, new spec gotchas |
 
+Doc-invalidation rule: any task/follow-up that will change the CLI surface,
+module layout, or a documented design rule MUST carry an explicit note in its
+item naming which of TASKS.md / ARCHITECTURE.md (or this file) it invalidates
+and what to update; when the work lands, make those doc updates in the same
+change. When adding a new follow-up, check whether it invalidates a doc.
+
 Protocol spec: `external-editor-json-rpc.md`. Reference implementation:
 `../sl-vscode-plugin` (esp. `packages/sl-ide-ws-client/`).
 

@@ -10,17 +10,17 @@ remove it from here.
 Context: tapple is updating the POSTED bug report; the master copy is on the web
 (https://feedback.secondlife.com/slua-alpha/p/bugs-with-the-lua-plugin-websocket,
 fetchable via curl — do not trust local copies). Item #4 ("Compile errors return
-no result") needs rewriting with today's A/B findings. All code changes from this
-session are UNCOMMITTED — tapple reviews notes + `git diff` before any commit.
-Announce every live probe.
+no result") needs rewriting with today's A/B findings. Code from this session is
+committed incrementally (tapple reviewed each step; see git log). Announce every
+live probe.
 
 **Environment:** official viewer 26.5.0 on ws://127.0.0.1:9021 with scratch
 object "Object" [260d253b-6f65-f110-ac0f-9e70699fad60] explored (leftover test
 items inside — clean up when done: `slsync --url ws://127.0.0.1:9021 items
 delete Object/<name> -y`, inventory view is flaky, retry + verify via objects
 show). Alchemy's scratch df7f06ef was DELETED in-world ~19:00Z — tapple
-re-exposes one on 9020 or F4 runs against 9021 only. Uncommitted `put
---save-timeout` (see `git diff`) is used by the repro; live tests in
+re-exposes one on 9020 or F4 runs against 9021 only. The committed `put
+--save-timeout` flag is used by the repro; live tests in
 tests/test_live.py use it too (`SLSYNC_LIVE_URL=ws://127.0.0.1:9021 uv run
 pytest -m live`).
 
@@ -34,8 +34,12 @@ pytest -m live`).
   ("ERROR line 4:              (to close '(' at line 3), got 'end'" — expected-text
   blank/garbled) while Alchemy rendered the full "Expected ')' ..." text. Include
   in the item #4 rewrite.
-- `script.compiled` notification: never observed on either viewer — including a
-  success case, but NOT yet proven with raw wire capture (step 2 below).
+- `script.compiled` notification: never observed — EXPLAINED BY SPEC (full read
+  2026-11-19): it is routed only to the connection subscribed via script.subscribe
+  AND only produced while the viewer's script editor for that script is open.
+  slsync never subscribes, so absence is by design, NOT a bug — do not report it.
+  The object-explorer path gets compile feedback inline in the content.save
+  response (which is where the real bugs are: see below).
 
 **Steps:**
 1. Run `tools/repro_compile_errors.sh` against each available viewer (default
@@ -43,14 +47,17 @@ pytest -m live`).
    (one viewer, object by NAME "Object", inline scripts, unique names,
    --save-timeout 30, CONFORMS/DEVIATION verdicts vs spec, self-cleanup) but has
    NOT been run live yet — verify it first.
-2. Prove `script.compiled` absence with raw capture: one connection with
-   on_raw_frame logging (pattern: tools/probe_create_wire.py), save a GOOD
-   script, grep the log for "script.compiled". If absent on success too, report
-   wording = "never observed", not "missing on failure".
+2. ~~Prove script.compiled absence with raw capture~~ — MOOT after full spec read
+   (see Established): its absence is by design for non-subscribed clients.
 3. **ASK TAPPLE (exit-code semantics):** put exits 0 when content is saved but
    compile state unknown (read-back path). Keep 0 vs exit non-zero so agents treat
    unconfirmed compiles as failures?
-4. Rewrite NOTES.md bug-report item #4 text from the repro output + step 2 result.
+4. Rewrite bug-report item #4 around the REAL deviation: on official 26.5.0 a
+   content.save of bad LSL returns NO response at all — spec guarantees inline
+   compiled/diagnostics, or -32001 within 60 s ("Scripts allow 60 seconds for
+   upload and compilation ... Exceeding either fails the call with -32001").
+   Include the A/B table (Alchemy responds inline; official hangs) plus the
+   empty-Luau-diagnostic-message nuance. Drop any script.compiled claim.
    DO NOT post; tapple reviews and posts.
 
 ### F7. item.create returns a pre-existing item id — investigate (suspected viewer bug, official 26.5.0)
@@ -86,8 +93,11 @@ f110-ac0f-9e70699fad60]):
   yet confirmed on demand.
 - Client-side audit done: session.py correlates responses by JSON-RPC id (not
   arrival order); TCP ordering rules out intra-connection reordering; duplicate
-  resolved ids are ignored. One theoretical hole to rule out with the wire scan:
-  a notification carrying an `id` would be misdispatched as a response.
+  resolved ids are ignored (session.py _dispatch, verified by full read). Two
+  dispatch edge cases for the wire scan to watch: (1) an inbound frame with an id
+  but NEITHER result NOR error resolves the pending call with result=None; (2) a
+  notification carrying an id is treated as a viewer→client REQUEST (method+id
+  branch), not a response — it would get -32601 back if unhandled.
 - Prior wire evidence: evidence/create-race-wire-20261119T2058Z.log — clean
   framing, single responses, no dupes/reordering in the documented race; also
   shows the viewer uses STRING ids ("rpc_1083") for its own requests vs our ints.
@@ -98,7 +108,7 @@ f110-ac0f-9e70699fad60]):
 **Steps:**
 1. `uv run pytest -q` → all pass/skip; then `SLSYNC_LIVE_URL=ws://127.0.0.1:9021
    uv run pytest -m live -v` — the bad-luau test previously failed only after a
-   hung bad-LSL save in the same process; with the uncommitted pre-create guard it
+   hung bad-LSL save in the same process; with the committed pre-create guard it
    should pass, or fail loudly with "create response referenced a pre-existing item".
 2. Reproduce under wire capture: `uv run --project . python tools/probe_create_wire.py
    ws://127.0.0.1:9021` (handles the step-1 race; writes /tmp/wire-capture-*.log —
@@ -109,7 +119,7 @@ f110-ac0f-9e70699fad60]):
 3. If reproduced: draft a NEW bug-report item (master copy on the web, see F4);
    tapple reviews and posts. Also run against Alchemy 9020 once a scratch object
    exists there.
-4. Keep the uncommitted slsync guards (`git diff`): create-race workaround now
+4. The slsync guards (now committed, see git log): create-race workaround now
    name-filters candidates (`_is_sim_rename`) — the old code overwrote an
    UNRELATED item when the viewer's inventory snapshot was stale (observed live);
    plus the pre-create snapshot guard rejecting create responses that reference a
@@ -155,7 +165,10 @@ Steps (each independently shippable; unit-test with FakeViewer where noted):
 3. Timeout unification: drop GET_TIMEOUT/SAVE_TIMEOUT constants and the
    --save-timeout knob (added+committed this session; deliberate reversal). One global
    --timeout as the unit for a single viewer op; per-op floors via max(--timeout, floor):
-   save/create 75 s, get/read-back 45 s — floors documented in help text.
+   save/create 75 s, get/read-back 45 s — spec-justified (full read 2026-11-19):
+   content.save allows 60 s for scripts / 30 s for notecards and "a client's own
+   timeout must exceed the longer of the two"; content.get times out at 30 s.
+   Document the floors in help text.
    Reconciliation primitives take an explicit budget (default 2× call timeout).
    Update tests/test_live.py SAVE_TIMEOUT_ARG → --timeout. Rewrite ARCHITECTURE.md
    "Invocation lifecycle" section to match reality afterwards.
@@ -186,9 +199,13 @@ Steps (each independently shippable; unit-test with FakeViewer where noted):
      match the fetch unit, and the only read primitive known is whole-prim
      (object.list returns full trees; no named-item-collection fetch observed).
      Per-item tracking stays useful at the WAITER layer (predicate "item X has
-     running==false"). REVISIT if F15's spec diff finds a finer-grained read method.
-     Delta-applying object.update payloads instead of re-fetching is a future
-     optimization, not the base design (viewer state is untrusted).
+     running==false"). The full spec read (NOTES, archived F15) found no finer-
+     grained read method — object.list is the only inventory read primitive.
+     Delta-applying object.update payloads instead of re-fetching is NOT possible
+     today anyway: the spec's delta sub-protocol (changes.inventory.added/removed/
+     modified/content_changed/running_changed) is specified but "not currently
+     emitted by the viewer" — only five full-replacement shapes are sent. Re-fetch
+     on dirty is the only viable base design.
    - Driver-agnostic: CLI mode = engine lives for ONE command, polls until its
      predicate is satisfied or the reconciliation budget (default 2× call timeout)
      expires; MCP mode (F17) = one long-lived engine per tracked prim, broadcasts
@@ -205,14 +222,21 @@ Steps (each independently shippable; unit-test with FakeViewer where noted):
    composition of named steps over this engine.
 5. Rebuild scripts start|stop --wait-update on the primitives: POLL inventory
    (bounded) instead of waiting for an object.update that never arrives for
-   set_running (observed live; old F1 remainder) — fixes the misleading "now:
-   running (no update observed)" output; keep the notification as an early-exit fast
-   path. objects explore likewise.
+   set_running (observed live; old F1 remainder). Spec context: set_running/reset
+   responses are documented as "success means dispatched, not applied" with
+   confirmation arriving only "if it arrives" as object.update — the hedge is real;
+   polling is the intended client behaviour. Fixes the misleading "now: running
+   (no update observed)" output; keep the notification as an early-exit fast path.
+   objects explore likewise.
 6. Live-test expansion per F8–F12 as those land.
 
 Supersedes/absorbs: old F5 knob gaps, F13 (step 2), F16 (step 4), the --wait-update
 half of old F1 (step 5). F7's client-side guards move into find_new_item (step 4);
 F7's investigation steps are unchanged.
+DOC UPDATES ON COMPLETION: ARCHITECTURE.md lifecycle section + "Stateless CLI"
+design rule (forward pointers already added there); TASKS.md Phase 3
+`scripts start|stop` line — its "--wait-update to confirm via object.update"
+description is superseded by step 5's poll-based behaviour.
 
 ### F3. Verify "Explore in IDE" multi-select behaviour (disputed claim, 2026-11-19)
 An earlier draft bug-report item (#8, NOT posted) claimed that clicking Explore in
@@ -235,6 +259,8 @@ dispatches object.script.reset — never run live.
 Safe test on a scratch object: timer script with llOwnerSay in state_entry → reset
 while running → tail should show the state_entry message again (re-initialised).
 Edge case: reset on a STOPPED script — does it start it, no-op, or error?
+DOC UPDATE ON COMPLETION: TASKS.md Phase 3 `scripts reset` line (currently
+"Same caveat") — mark live-verified with date.
 
 ### F9. `commands run viewer.script.recompile_all` untested (split of old F2)
 Params: --object-id (required), --target luau|lsl2|mono|auto (required).
@@ -244,6 +270,9 @@ via viewer.camera.focus 2026-11-19 (NOTES.md); untested here is the command's ef
 Test: scratch object with one LSL + one Luau script → recompile_all --target auto →
 objects show (vm fields intact) + tail (scripts still run). Open question: behaviour
 when one of the scripts has a compile error (interacts with F4 findings).
+DOC UPDATE ON COMPLETION (applies to F9–F12): TASKS.md Phase 4 `commands run`
+line — "Implemented; not exercised live ... See FOLLOWUPS.md F2" grows stale as
+each command is verified; update it per command.
 
 ### F10. `commands run viewer.script.reset_all` untested (split of old F2)
 Params: --object-id (required). Resets ALL scripts in the object — affects running
@@ -281,25 +310,19 @@ list/run verbs. Evaluate: discoverability via --help, agent ergonomics (Phase 5
 decision: CLI only, good --help matters), and whether the generic
 `run --param k=v` interface earns its keep vs typed shortcuts (old Phase 4 optional
 item). Decide BEFORE Phase 6 help-text polish so we don't polish a layer we remove.
+DOC UPDATE IF THE GROUP IS REMOVED/RESHAPED: TASKS.md Phase 4 items (commands
+list/run, optional typed shortcuts) and the Phase 6 help-text scope;
+ARCHITECTURE.md is unaffected (its Layout description is command-agnostic).
 
 Related (tapple): `commands list` shouldn't need a network connection at all — it
 could be a static help page. Counter-consideration: today it calls the live
 command.list method, which reports what THIS viewer build supports (command set is
 feature-gated, ARCHITECTURE.md gotcha #8); a static page risks drift. Candidate
-resolution: static list from the spec's documented command set (ties into F15) for
-discovery, with the live check available if/when it still earns its place.
-
-### F15. Review protocol spec for features not exposed in slsync (raised 2026-11-19)
-Unknown: does external-editor-json-rpc.md define more commands than the 5 that
-command.list returned at runtime (viewer.script.recompile_all, viewer.script.reset_all,
-viewer.object.save_back_to_contents, viewer.camera.focus, viewer.teleport)? Walk the
-spec method by method and diff against slsync's surface (system.*, object.*,
-script.*, command.*); record gaps as tasks or explicit non-goals in ARCHITECTURE.md.
-Note the spec may lag the implementation in BOTH directions: system.getStats is NOT
-in the public spec (undocumented; see NOTES B4).
+resolution: static list from the spec's documented command set (spec-vs-surface
+note in NOTES.md) for discovery, with the live check available if/when it still earns its place.
 
 ### F16. Revisit `_is_sim_rename` in cli.py (tapple review, 2026-11-19)
-Three objections to the uncommitted helper used by put's create-race workaround:
+Three objections to the helper used by put's create-race workaround:
 1. Name is unclear.
 2. It incompletely encapsulates SL's duplicate-rename logic: the sim increments
    the trailing number until it finds a free slot ("name", "name 1", "name 2"...);
@@ -323,15 +346,21 @@ if F7 gets fixed viewer-side.
 RESOLUTION ADOPTED: F5 step 4 (extract into find_new_item + rename + FakeViewer unit
 tests). This item closes when that lands.
 
-### F17. MCP-cached inventory snapshots (tapple, 2026-11-19 — she wants to think on this first)
-New angle for the parked MCP question (NOTES.md "Design notes: tail for agents" +
-Decision #2 CLI-only; ARCHITECTURE.md descope note): snapshotting and diffing prim
-inventory would work better inside an MCP server, because the snapshot wouldn't
-need to be recomputed on demand per CLI invocation — it could stay cached and kept
-fresh by the persistent connection. This session's F7/F16 stale-snapshot problems
-are exactly the pain a cached, continuously-updated snapshot would remove. Good idea
-in theory; needs followup and review before any design work. BLOCKED ON: tapple
-thinking it through.
+### F17. MCP server question — mechanism half resolved by F5 step 4 (tapple, 2026-11-19)
+Original framing: snapshotting/diffing prim inventory would work better inside an
+MCP server because the snapshot could stay cached and kept fresh by a persistent
+connection instead of being recomputed per CLI invocation. **The mechanism half is
+now designed**: F5 step 4's object_inventory.py IS that cached, dirty-tracked,
+continuously-updatable per-prim snapshot — driver-agnostic (CLI mode: lives one
+command; MCP mode: long-lived per prim). No separate snapshot design work remains
+here.
+What REMAINS for F17 is purely the decision: do we build an MCP server at all, as a
+long-lived DRIVER of that engine plus multi-agent coordination/audit and full
+request/response visibility on one connection (NOTES pro-MCP argument)? That is
+Decision #2 (CLI-only) territory. BLOCKED ON: tapple thinking it through.
+DOC UPDATE IF PURSUED TO COMPLETION: ARCHITECTURE.md Layout note ("mcp_server.py
+was planned, descoped 2026-11-18") + the "Stateless CLI" design rule; TASKS.md
+Phase 5 decision line ("CLI only, no MCP server").
 
 Protocol fact reinforcing this (2026-11-19): the protocol has NO stream-level
 sequence numbers — only per-call JSON-RPC ids (ours are ints; the viewer's own
@@ -348,5 +377,6 @@ it feels right.
 `slsync put`'s help/docstring claims "'-' reads stdin", but the click argument is
 click.Path(exists=True), which rejects "-" with "Path '-' does not exist" (hit
 live). Either fix (special-case "-" before path validation) or remove the claim
-from help/docstring. Small.
+from help/docstring. DOC UPDATE EITHER WAY: TASKS.md Phase 2 put item documents
+"`-` = stdin" — keep it if fixed, strike it if the claim is removed. Small.
 

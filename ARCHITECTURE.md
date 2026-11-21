@@ -41,7 +41,9 @@ Design rules:
 
 - **Stateless CLI.** Every invocation connects fresh. No local inventory cache:
   `object.list` returns *all currently explored objects with full trees*, so any
-  item-level command can call it and locate its target by UUID.
+  item-level command can call it and locate its target by UUID. (True today; F5
+  step 4's object_inventory.py will add a scoped per-prim cached copy — see the
+  lifecycle-section note below.)
 - **One shared session core** (`ViewerSession`) used by every command, so
   behaviour stays identical.
 - Output: human-readable tables/text by default; `--json` for raw JSON everywhere.
@@ -75,7 +77,9 @@ live in TASKS.md.)
    - `scripts start|stop --wait-update` → up to 15 s for an `object.update`
    - `objects explore` → up to `--wait` (default 15 s) for the publish
 
-Known inconsistency in these bounds: see FOLLOWUPS.md F5.
+Known inconsistency in these bounds: see FOLLOWUPS.md F5. This whole section
+describes the PRE-F5 state: F5 step 4 (object_inventory.py sync engine) replaces
+these ad-hoc reconciliation loops and rewrites this section (F5 step 3).
 
 ## Gotchas from the spec (do not trip on these)
 
@@ -87,9 +91,10 @@ Known inconsistency in these bounds: see FOLLOWUPS.md F5.
    always readable. Notecard envelopes are stripped by the viewer on get.
 3. `object.content.save`: scripts allow up to 60 s (upload + compile); notecards 30 s.
    Compile diagnostics come back **inline in the response** — do *not* wait for a
-   `script.compiled` notification after this path. (Caveat found live: for a
-   syntactically invalid script the viewer returns success with NO diagnostics at
-   all — see NOTES.md.)
+   `script.compiled` notification after this path (spec: that notification is routed
+   only to subscribed connections). Caveat found live 2026-11-19: on official 26.5.0
+   a save of syntactically invalid LSL returns NO response at all (client timeout;
+   slsync falls back to read-back) — see FOLLOWUPS F4.
 4. `object.script.set_running` / `reset` / `object.modify` / `object.item.modify` /
    item create/delete: `success: true` means *dispatched*. Confirmation arrives as
    `object.update`.
